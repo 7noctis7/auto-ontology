@@ -56,11 +56,33 @@ def apply_edit(project: Project, edit: Edit) -> None:
         _delete_class(project, edit.old)
     elif edit.op == "update_description":
         _update_description(ontology, edit.old, edit.description)
+    elif edit.op == "set_genre":
+        _set_document_field(project, edit.document_id, "genre", edit.new)
+    elif edit.op == "set_domain":
+        _set_document_field(project, edit.document_id, "domain", edit.new)
     else:
         raise EditError(f"Opération inconnue : {edit.op}.")
 
     project.ontology, _warnings = normalize_ontology(project.ontology)
     _realign(project)
+
+
+def _set_document_field(
+    project: Project, document_id: str, field: str, value: str
+) -> None:
+    cleaned = value.strip()
+    if not document_id or not cleaned:
+        raise EditError("Le document et la valeur sont requis.")
+    for document in project.documents:
+        if document.id == document_id:
+            setattr(document, field, cleaned)
+            if field == "genre":
+                document.genre_source = "user"
+                document.genre_confidence = 1.0
+            if field == "domain":
+                document.domain_confidence = 1.0
+            return
+    raise EditError("Document introuvable.")
 
 
 def _require(old: str, new: str) -> None:

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from auto_ontology.text_ontology.api import install_api
 from auto_ontology.text_ontology.documents import (
     DocumentReadError,
     load_bytes,
@@ -33,6 +34,7 @@ from auto_ontology.text_ontology.llm_settings import (
     resolve_llm_config,
     test_connection,
 )
+from auto_ontology.text_ontology.learning import remember_edit
 from auto_ontology.text_ontology.mutations import EditError, apply_edit
 from auto_ontology.text_ontology.pipeline import (
     IngestError,
@@ -107,6 +109,7 @@ class SettingsBody(BaseModel):
     timeout_s: int | None = Field(default=None, gt=0, le=3600)
     max_tokens: int | None = Field(default=None, gt=0, le=128_000)
     chunk_chars: int | None = Field(default=None, gt=200, le=100_000)
+    watch_dir: str | None = None
     clear_api_key: bool = False
 
 
@@ -212,6 +215,7 @@ def create_app(
         project = _require_project(studio)
         studio.store.save(project, snapshot=True)
         apply_edit(project, body)
+        remember_edit(studio.store, project, body)
         studio.store.save(project, snapshot=False)
         return _view(studio)
 
@@ -338,7 +342,13 @@ def create_app(
         return FileResponse(_STATIC / "index.html")
 
     app.mount("/assets", StaticFiles(directory=_STATIC), name="assets")
+    install_api(app)
     return app
+
+
+def _remember_edit(studio: Studio, project: Project, edit: Edit) -> None:
+    """Keep the correction for the next extraction."""
+    remember_edit(studio.store, project, edit)
 
 
 def _apply_settings(saved: StudioSettings, body: SettingsBody) -> None:
@@ -352,6 +362,8 @@ def _apply_settings(saved: StudioSettings, body: SettingsBody) -> None:
         saved.max_tokens = body.max_tokens
     if body.chunk_chars is not None:
         saved.chunk_chars = body.chunk_chars
+    if body.watch_dir is not None:
+        saved.watch_dir = body.watch_dir.strip()
     if body.clear_api_key:
         saved.api_key = ""
     elif body.api_key:
@@ -472,6 +484,7 @@ def _projects(studio: Studio) -> list[dict[str, Any]]:
 def _view(studio: Studio) -> dict[str, Any]:
     config = resolve_llm_config(studio.store)
     llm = public_llm(config, demo=studio.fake or studio.llm_factory is not None)
+    llm["watch_dir"] = studio.store.settings().watch_dir
     project = _open_project(studio)
     projects = _projects(studio)
     if project is None:

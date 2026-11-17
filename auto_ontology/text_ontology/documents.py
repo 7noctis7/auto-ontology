@@ -54,6 +54,7 @@ class LoadedDocument:
     noise_ratio: float
     warnings: list[str] = field(default_factory=list)
     original: bytes = b""
+    pages: int = 0
 
 
 def noise_ratio(text: str) -> float:
@@ -145,6 +146,7 @@ def _finish(
     raw_text: str,
     warnings: list[str],
     original: bytes,
+    pages: int = 0,
 ) -> LoadedDocument:
     text, notes = clean_text(raw_text)
     warnings = [*warnings, *notes]
@@ -162,6 +164,7 @@ def _finish(
         noise_ratio=ratio,
         warnings=warnings,
         original=original,
+        pages=pages or max(1, len(text) // 1800) if text.strip() else 0,
     )
 
 
@@ -199,7 +202,7 @@ def _html_text(data: bytes) -> str:
     return parser.text()
 
 
-def _pdf_text(data: bytes) -> tuple[str, list[str]]:
+def _pdf_text(data: bytes) -> tuple[str, list[str], int]:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover - dependency is declared
@@ -219,7 +222,7 @@ def _pdf_text(data: bytes) -> tuple[str, list[str]]:
             "Ce PDF ne contient presque pas de texte. C'est probablement un scan : "
             "un OCR serait nécessaire, et cette application ne l'inclut pas."
         )
-    return text, warnings
+    return text, warnings, page_count
 
 
 def _docx_text(data: bytes) -> str:
@@ -291,8 +294,8 @@ def load_bytes(filename: str, data: bytes) -> LoadedDocument:
     suffix = _suffix(name)
     warnings: list[str] = []
     if suffix in _PDF_SUFFIXES:
-        text, warnings = _pdf_text(data)
-        return _finish(name, "application/pdf", text, warnings, data)
+        text, warnings, pages = _pdf_text(data)
+        return _finish(name, "application/pdf", text, warnings, data, pages)
     if suffix in _EPUB_SUFFIXES:
         if not zipfile.is_zipfile(io.BytesIO(data)):
             raise DocumentReadError("Cet EPUB n'est pas une archive lisible.")

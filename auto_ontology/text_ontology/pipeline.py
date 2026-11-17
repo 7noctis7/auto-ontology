@@ -27,7 +27,15 @@ from auto_ontology.text_ontology.extractor import (
     extract_text_ontology,
     prompt_version,
 )
+from auto_ontology.text_ontology.learning import (
+    align_names,
+    drop_rejected,
+    lessons_text,
+    merged_memory,
+    record_score,
+)
 from auto_ontology.text_ontology.llm_settings import LlmConfig
+from auto_ontology.text_ontology.profile import profile_text
 from auto_ontology.text_ontology.models import TextOntology
 from auto_ontology.text_ontology.mutations import absorb_provenance
 from auto_ontology.text_ontology.normalize import normalize_ontology
@@ -119,6 +127,7 @@ def ingest_document(
         model=model_label,
         fingerprint=stamp,
     )
+    _apply_profile(document, loaded)
     project.documents.append(document)
     store.remember_upload(project.id, document.id, loaded.filename, loaded.original)
     store.save(project, snapshot=False)
@@ -176,6 +185,7 @@ def ingest_document(
         )
 
     cache = FileChunkCache(store.cache_dir(project.id))
+    memory = merged_memory(project, store)
     try:
         result = extract_text_ontology(
             loaded.text,
@@ -190,6 +200,7 @@ def ingest_document(
             on_chunk=on_chunk,
             cancel_event=cancel_event,
             model_name=model_label,
+            preface=lessons_text(memory),
         )
     except Exception:
         document.status = "failed"
@@ -197,9 +208,10 @@ def ingest_document(
         store.save(project, snapshot=False)
         raise
 
-    project.ontology = result.ontology
+    aligned = drop_rejected(align_names(result.ontology, memory, base), memory)
+    project.ontology, _warnings = normalize_ontology(aligned, known_classes)
     triplets, attributes, classes = resolve_provenance(
-        result.ontology,
+        project.ontology,
         raw_chunks,
         document_id=document.id,
         filename=loaded.filename,
@@ -216,6 +228,11 @@ def ingest_document(
         document.status = "incomplete"
     else:
         document.status = "ok"
+    point = record_score(project, loaded.text)
+    home_memory = store.load_memory()
+    home_memory.scores.append(point)
+    del home_memory.scores[:-40]
+    store.save_memory(home_memory)
     store.save(project, snapshot=False)
     on_event(
         {
@@ -257,6 +274,7 @@ def load_sample(store: ProjectStore, project: Project) -> tuple[Project, str]:
         fingerprint=stamp,
         warnings=["Exemple local : aucun modèle n'a été appelé."],
     )
+    _apply_profile(document, loaded)
     merged, _warnings = normalize_ontology(
         _union(project.ontology, [sample_ontology()])
     )
@@ -270,9 +288,24 @@ def load_sample(store: ProjectStore, project: Project) -> tuple[Project, str]:
     )
     absorb_provenance(project, triplets, attributes, classes)
     project.documents.append(document)
+    record_score(project, loaded.text)
     store.remember_upload(project.id, document.id, document.filename, loaded.original)
     store.save(project, snapshot=False)
     return project, "loaded"
+
+
+def _apply_profile(document: DocumentRecord, loaded: LoadedDocument) -> None:
+    profile = profile_text(loaded.text, filename=loaded.filename, pages=loaded.pages)
+    document.title = profile.title
+    document.author = profile.author
+    document.date = profile.date
+    document.language = profile.language
+    document.pages = profile.pages
+    document.genre = profile.genre
+    document.genre_confidence = profile.genre_confidence
+    document.domain = profile.domain
+    document.domain_confidence = profile.domain_confidence
+    document.genre_source = "auto"
 
 
 def _sample_loaded() -> LoadedDocument:

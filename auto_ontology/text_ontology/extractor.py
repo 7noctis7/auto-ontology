@@ -146,6 +146,7 @@ def build_user_message(
     known_classes: Sequence[str] = (),
     known_predicates: Sequence[str] = (),
     known_entities: Sequence[str] = (),
+    preface: str = "",
 ) -> str:
     """The human turn for one chunk: what to reuse, then the text itself.
 
@@ -153,6 +154,9 @@ def build_user_message(
     a document are analysed rather than followed.
     """
     lines: list[str] = []
+    if preface.strip():
+        lines.append(preface.strip())
+        lines.append("")
     if known_classes or known_predicates or known_entities:
         lines.append(
             "Concepts déjà présents dans l'ontologie. Réutilise ces noms exacts "
@@ -207,6 +211,7 @@ def extract_text_ontology(
     on_chunk: Callable[[ChunkEvent], None] | None = None,
     cancel_event: threading.Event | None = None,
     model_name: str = "",
+    preface: str = "",
 ) -> TextOntologyResult:
     """Extract and normalize the ontology stated in *text*.
 
@@ -269,6 +274,7 @@ def extract_text_ontology(
             known_classes=classes,
             known_predicates=predicates,
             known_entities=entities,
+            preface=preface,
         )
         _emit(
             on_chunk,

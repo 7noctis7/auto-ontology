@@ -15,6 +15,22 @@
   --radius: 10px;
   --font: "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --bar: #e6edf5;
+}
+:root[data-theme="dark"] {
+  --bg: #141a22;
+  --panel: #1c2430;
+  --ink: #e7edf5;
+  --muted: #c5d0de;
+  --faint: #9aabbf;
+  --line: #2c3848;
+  --accent: #56b4e9;
+  --accent-ink: #10202c;
+  --danger: #e69f00;
+  --ok: #009e73;
+  --warn: #e6c27a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --bar: #2a3646;
 }
 
 * { box-sizing: border-box; }
@@ -60,7 +76,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .project-name:hover, .project-name:focus { border-color: var(--line); background: var(--bg); }
 .project-switch { max-width: 160px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
-.views { display: flex; gap: 4px; }
+.views { display: flex; gap: 4px; flex-wrap: wrap; }
 .views button, .top-actions button, .menu summary, .paste-actions button, .drawer button {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -261,10 +277,10 @@ tr.is-on { background: #e8f3fb; }
   text-align: left;
   position: relative;
 }
-.bar-row button span.track {
+.bar-row button span.track, .bar-row span.track {
   display: block;
   height: 8px;
-  background: #e6edf5;
+  background: var(--bar);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -333,6 +349,19 @@ tr.is-on { background: #e8f3fb; }
   pointer-events: none;
 }
 body.is-dropping .drop-overlay { display: flex; }
+
+.panel-view { position: absolute; inset: 0; overflow: auto; padding: 16px 18px 48px; background: var(--bg); }
+.stack { display: flex; flex-direction: column; gap: 8px; max-width: 980px; }
+.doc-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.doc-card header { display: flex; justify-content: space-between; gap: 8px; }
+.matrix td, .matrix th { font-size: 12px; min-width: 28px; }
+.timeline { margin: 0; padding-left: 18px; }
+.guide pre { background: var(--panel); border: 1px solid var(--line); padding: 10px; overflow: auto; }
+#minimap { position: absolute; right: 8px; bottom: 40px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.ask input { width: 100%; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.tour { position: fixed; inset: 0; background: rgba(16, 24, 40, 0.28); z-index: 8; display: flex; align-items: flex-end; justify-content: center; padding: 24px; }
+.tour-card { background: var(--panel); color: var(--ink); border-radius: 12px; padding: 16px; max-width: 420px; box-shadow: var(--shadow); }
+.graph-tools select, .doc-card select { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 4px; }
 
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }

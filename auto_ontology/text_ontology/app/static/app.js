@@ -5,6 +5,10 @@
   var STR = {
     fr: {
       viewGraph: "Graphe", viewTree: "Hiérarchie", viewGlossary: "Glossaire", viewFacts: "Faits",
+      viewDocuments: "Documents", viewAnalysis: "Analyse", viewBoards: "Tableaux", viewGuide: "Guide",
+      theme: "Sombre", focus: "Focus", communities: "Communautés", fit: "Recentrer",
+      layoutForce: "Force", watch: "Dossier à importer", ask: "Question",
+      askPlaceholder: "Qui est relié à quoi ?", tourSkip: "Passer", tourNext: "Suivant",
       search: "Rechercher…", add: "Ajouter", undo: "Annuler", redo: "Rétablir",
       download: "Télécharger", settings: "Réglages",
       dropTitle: "Déposez un document", dropHint: "PDF, EPUB, DOCX, HTML, Markdown ou texte",
@@ -45,6 +49,10 @@
     },
     en: {
       viewGraph: "Graph", viewTree: "Hierarchy", viewGlossary: "Glossary", viewFacts: "Facts",
+      viewDocuments: "Documents", viewAnalysis: "Analysis", viewBoards: "Boards", viewGuide: "Guide",
+      theme: "Dark", focus: "Focus", communities: "Communities", fit: "Fit",
+      layoutForce: "Force", watch: "Folder to import", ask: "Question",
+      askPlaceholder: "Who is linked to what?", tourSkip: "Skip", tourNext: "Next",
       search: "Search…", add: "Add", undo: "Undo", redo: "Redo",
       download: "Download", settings: "Settings",
       dropTitle: "Drop a document", dropHint: "PDF, EPUB, DOCX, HTML, Markdown or text",
@@ -88,7 +96,8 @@
   var PALETTE = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#882255", "#332288"];
   var FORMATS = [
     ["html", "HTML"], ["mermaid", "Mermaid"], ["turtle", "Turtle"], ["cypher", "Cypher"],
-    ["csv", "CSV"], ["jsonld", "JSON-LD"], ["json", "JSON"], ["project", "Projet JSON"]
+    ["csv", "CSV"], ["jsonld", "JSON-LD"], ["json", "JSON"], ["project", "Projet JSON"],
+    ["dashboard", "Tableaux HTML"], ["jsonl", "JSONL"]
   ];
 
   var lang = localStorage.getItem("ontology.lang") || "fr";
@@ -177,6 +186,7 @@
     renderStage();
     renderSide();
     renderDownload();
+    document.dispatchEvent(new CustomEvent("ontology:render"));
   }
 
   function syncProject() {
@@ -261,10 +271,14 @@
     var tree = document.getElementById("tree-view");
     empty.hidden = hasContent();
     var showGraph = viewName === "graph";
+    var panel = document.getElementById("panel-view");
+    var panelViews = { documents: 1, analysis: 1, dashboards: 1, guide: 1 };
     graphWrap.hidden = !showGraph;
     table.hidden = !(viewName === "glossary" || viewName === "facts");
     tree.hidden = viewName !== "hierarchy";
+    if (panel) panel.hidden = !panelViews[viewName];
     if (showGraph) renderGraph();
+    if (panelViews[viewName] && window.StudioPanels) window.StudioPanels.render(viewName);
     if (viewName === "glossary") renderTable("glossary");
     if (viewName === "facts") renderTable("facts");
     if (viewName === "hierarchy") renderTree();
@@ -279,6 +293,26 @@
     families.sort();
     var index = Math.max(0, families.indexOf(family));
     return PALETTE[index % PALETTE.length];
+  }
+
+  function nodeColor(node) {
+    var box = document.getElementById("communities");
+    if (box && box.checked) return PALETTE[(node.community || 0) % PALETTE.length];
+    return familyColor(node.family || "");
+  }
+
+  function networkOptions(reduce) {
+    var layout = (document.getElementById("layout") || {}).value || "force";
+    var options = {
+      physics: reduce ? false : { stabilization: { iterations: 180 }, barnesHut: { springLength: 140 } },
+      interaction: { hover: true, keyboard: true, tooltipDelay: 120 },
+      edges: { smooth: { type: "dynamic" } }
+    };
+    if (layout === "hierarchy") {
+      options.layout = { hierarchical: { direction: "UD", sortMethod: "directed", levelSeparation: 90 } };
+      options.physics = false;
+    }
+    return options;
   }
 
   function inkFor(fill) {
@@ -304,6 +338,13 @@
           edges.push({ id: "la-" + id, from: node.id, to: id, label: attribute.key, kind: "attribute", support: 1 });
         });
       });
+    }
+    if (document.getElementById("focus-mode") && document.getElementById("focus-mode").checked && selected) {
+      var keep = neighborSet(selected, edges);
+      nodes = nodes.filter(function (node) { return keep[node.id]; });
+      var keepIds = {};
+      nodes.forEach(function (node) { keepIds[node.id] = true; });
+      edges = edges.filter(function (edge) { return keepIds[edge.from] && keepIds[edge.to]; });
     }
     if (document.getElementById("classes-only").checked) {
       var classIds = {};
@@ -342,6 +383,17 @@
         if ((node.documents || []).indexOf(filter.value) >= 0) allowed[node.id] = true;
       });
       expand(allowed, edges);
+    } else if (filter && filter.kind === "genre") {
+      allowed = {};
+      nodes.forEach(function (node) {
+        if ((node.genres || []).indexOf(filter.value) >= 0) allowed[node.id] = true;
+      });
+      expand(allowed, edges);
+    } else if (filter && filter.kind === "scope") {
+      allowed = {};
+      nodes.forEach(function (node) {
+        if (node.scope === filter.value) allowed[node.id] = true;
+      });
     }
     if (allowed) {
       nodes = nodes.filter(function (node) { return allowed[node.id]; });
@@ -388,7 +440,7 @@
     }
     var focus = selected ? neighborSet(selected, built.edges) : null;
     var visNodes = built.nodes.map(function (node) {
-      var color = node.kind === "literal" ? "#5c6b80" : familyColor(node.family || "");
+      var color = node.kind === "literal" ? "#5c6b80" : nodeColor(node);
       var shape = node.kind === "class" ? "diamond" : (node.kind === "literal" ? "box" : "dot");
       var size = Math.max(12, Math.min(40, 8 + 7 * Math.sqrt(node.degree || 0)));
       var dim = focus && !focus[node.id];
@@ -404,6 +456,15 @@
       if (positions[node.id]) { item.x = positions[node.id].x; item.y = positions[node.id].y; }
       return item;
     });
+    var layoutName = (document.getElementById("layout") || {}).value || "force";
+    if (layoutName === "circle") {
+      visNodes.forEach(function (item, index) {
+        if (item.x != null) return;
+        var angle = (Math.PI * 2 * index) / Math.max(1, visNodes.length);
+        item.x = Math.cos(angle) * 280;
+        item.y = Math.sin(angle) * 280;
+      });
+    }
     var visEdges = built.edges.map(function (edge) {
       var dim = focus && !(focus[edge.from] && focus[edge.to]);
       return {
@@ -420,11 +481,7 @@
       nodesDs = new vis.DataSet(visNodes);
       edgesDs = new vis.DataSet(visEdges);
       var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      network = new vis.Network(document.getElementById("graph"), { nodes: nodesDs, edges: edgesDs }, {
-        physics: reduce ? false : { stabilization: { iterations: 180 }, barnesHut: { springLength: 140 } },
-        interaction: { hover: true, keyboard: true, tooltipDelay: 120 },
-        edges: { smooth: { type: "dynamic" } }
-      });
+      network = new vis.Network(document.getElementById("graph"), { nodes: nodesDs, edges: edgesDs }, networkOptions(reduce));
       network.on("click", function (params) {
         selected = params.nodes.length ? params.nodes[0] : null;
         renderGraph();
@@ -453,6 +510,28 @@
       renderGraph.signature = signature;
       requestAnimationFrame(function () { if (network) network.fit({ animation: false }); });
     }
+    drawMinimap();
+  }
+
+  function drawMinimap() {
+    var canvas = document.getElementById("minimap");
+    if (!canvas || !network) return;
+    var ctx = canvas.getContext("2d");
+    var positionsNow = network.getPositions();
+    var ids = Object.keys(positionsNow);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!ids.length) return;
+    var xs = ids.map(function (id) { return positionsNow[id].x; });
+    var ys = ids.map(function (id) { return positionsNow[id].y; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    var spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+    ids.forEach(function (id) {
+      var x = 6 + ((positionsNow[id].x - minX) / spanX) * (canvas.width - 12);
+      var y = 6 + ((positionsNow[id].y - minY) / spanY) * (canvas.height - 12);
+      ctx.fillStyle = "#0072B2";
+      ctx.fillRect(x, y, 3, 3);
+    });
   }
 
   function neighborSet(id, edges) {
@@ -591,6 +670,28 @@
       el("h2", {}, [state.project ? state.project.name : ""]),
       el("p", { class: "crumb" }, [state.project ? state.project.path : ""])
     ]);
+    var ask = el("form", { class: "ask", onsubmit: function (event) {
+      event.preventDefault();
+      var input = event.target.querySelector("input");
+      fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: input.value })
+      }).then(readJson).then(function (body) {
+        var out = document.getElementById("ask-answer");
+        if (!out) return;
+        var lines = [body.answer || ""];
+        (body.facts || []).slice(0, 3).forEach(function (fact) {
+          if (fact.quote) lines.push(fact.filename + " — " + fact.quote);
+        });
+        out.textContent = lines.join("\n");
+      }).catch(function (error) { showBanner(error.message); });
+    }}, [
+      el("h3", {}, [t("ask")]),
+      el("input", { type: "search", placeholder: t("askPlaceholder"), "aria-label": t("ask") }),
+      el("p", { id: "ask-answer", class: "muted" }, [])
+    ]);
+    wrap.append(ask);
     wrap.append(el("h3", {}, [t("topClasses")]));
     wrap.append(bars(stats.top_classes || [], "class"));
     wrap.append(el("h3", {}, [t("topPredicates")]));
@@ -836,6 +937,7 @@
     form.chunk_chars.value = llm.chunk_chars || 12000;
     form.timeout_s.value = llm.timeout_s || 120;
     form.max_tokens.value = llm.max_tokens || 8192;
+    if (form.watch_dir) form.watch_dir.value = llm.watch_dir || "";
     var source = { env: t("sourceEnv"), file: t("sourceFile"), default: t("sourceDefault") }[llm.source] || "";
     document.getElementById("settings-source").textContent = source + (llm.key_hint ? " " + llm.key_hint : "");
     document.getElementById("test-result").textContent = "";
@@ -975,6 +1077,20 @@
   });
   document.getElementById("undo-btn").addEventListener("click", function () { postJson("/api/undo").catch(function (error) { showBanner(error.message); }); });
   document.getElementById("redo-btn").addEventListener("click", function () { postJson("/api/redo").catch(function (error) { showBanner(error.message); }); });
+  document.getElementById("layout").addEventListener("change", function () {
+    nodesDs = null;
+    network = null;
+    if (viewName === "graph") renderGraph();
+  });
+  document.getElementById("fit-btn").addEventListener("click", function () {
+    if (network) network.fit({ animation: false });
+  });
+  document.getElementById("theme-btn").addEventListener("click", function () {
+    var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("ontology.theme", next);
+    document.getElementById("theme-btn").textContent = next === "dark" ? (lang === "fr" ? "Clair" : "Light") : t("theme");
+  });
   document.getElementById("lang-btn").addEventListener("click", function () {
     lang = lang === "fr" ? "en" : "fr";
     localStorage.setItem("ontology.lang", lang);
@@ -992,7 +1108,8 @@
       model: form.model.value.trim(),
       timeout_s: Number(form.timeout_s.value),
       max_tokens: Number(form.max_tokens.value),
-      chunk_chars: Number(form.chunk_chars.value)
+      chunk_chars: Number(form.chunk_chars.value),
+      watch_dir: form.watch_dir ? form.watch_dir.value.trim() : ""
     };
     if (form.api_key.value.trim()) payload.api_key = form.api_key.value.trim();
     try {
@@ -1030,7 +1147,7 @@
   document.getElementById("project-switch").addEventListener("change", function (event) {
     postJson("/api/projects/" + event.target.value + "/open").catch(function (error) { showBanner(error.message); });
   });
-  ["show-types", "classes-only", "show-literals"].forEach(function (id) {
+  ["show-types", "classes-only", "show-literals", "focus-mode", "communities"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", function () { if (viewName === "graph") renderGraph(); });
   });
   document.getElementById("cancel-btn").addEventListener("click", function () {
@@ -1083,5 +1200,17 @@
     }
   });
 
+  if (localStorage.getItem("ontology.theme") === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+  window.StudioUI = {
+    get state() { return state; },
+    get lang() { return lang; },
+    t: t,
+    setFilter: setFilter,
+    edit: edit,
+    postJson: postJson,
+    el: el
+  };
   refresh().catch(function (error) { showBanner(error.message); });
 })();

@@ -31,6 +31,7 @@ def serve(
     open_browser: bool = True,
     home: Path | None = None,
     fake: bool = False,
+    watch: str | None = None,
 ) -> None:
     """Bind the studio and, unless asked not to, open it in the browser."""
     import uvicorn
@@ -38,6 +39,12 @@ def serve(
     from auto_ontology.text_ontology.app.server import create_app
 
     root = Path(home) if home is not None else default_home()
+    if watch:
+        from auto_ontology.text_ontology.store import ProjectStore
+
+        settings = ProjectStore(root).settings()
+        settings.watch_dir = watch
+        ProjectStore(root).save_settings(settings)
     chosen = port if port is not None else int(os.environ.get("ONTOLOGY_PORT", "4173"))
     url = f"http://{host}:{chosen}/"
     print(f"Ontologie — {url}")
@@ -49,12 +56,11 @@ def serve(
     print("Arrêt : Ctrl+C")
     if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
-    uvicorn.run(
-        create_app(home=root, fake=fake),
-        host=host,
-        port=chosen,
-        log_level="info",
-    )
+    app = create_app(home=root, fake=fake)
+    from auto_ontology.text_ontology.watch import start_watcher
+
+    start_watcher(app.state.studio)
+    uvicorn.run(app, host=host, port=chosen, log_level="info")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,6 +88,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Extraction de démonstration, sans appeler de modèle.",
     )
+    serve_parser.add_argument(
+        "--watch",
+        default=None,
+        help="Dossier importé automatiquement (les fichiers déjà connus sont ignorés).",
+    )
+    import_parser = commands.add_parser(
+        "import", help="Extrait plusieurs fichiers dans le projet courant."
+    )
+    import_parser.add_argument("paths", nargs="+")
+    import_parser.add_argument("--home", default=None)
+    import_parser.add_argument("--fake", action="store_true")
+    ask_parser = commands.add_parser(
+        "ask", help="Répond depuis les faits du projet, avec la source."
+    )
+    ask_parser.add_argument("question")
+    ask_parser.add_argument("--home", default=None)
+    mcp_parser = commands.add_parser(
+        "mcp", help="Serveur MCP sur l'entrée standard, en lecture seule."
+    )
+    mcp_parser.add_argument("--home", default=None)
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if args.command == "serve":
         serve(
@@ -90,8 +116,83 @@ def main(argv: list[str] | None = None) -> int:
             open_browser=not args.no_browser,
             home=Path(args.home) if args.home else None,
             fake=args.fake,
+            watch=args.watch,
         )
+    elif args.command == "import":
+        import_paths(
+            [Path(path) for path in args.paths],
+            home=Path(args.home) if args.home else None,
+            fake=args.fake,
+        )
+    elif args.command == "ask":
+        print(ask_project(args.question, home=Path(args.home) if args.home else None))
+    elif args.command == "mcp":
+        from auto_ontology.text_ontology.mcp_stdio import serve_mcp
+
+        serve_mcp(Path(args.home) if args.home else None)
     return 0
+
+
+def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
+    """Extract each file into the current project. Same pipeline as the page."""
+    from auto_ontology.text_ontology.documents import load_bytes
+    from auto_ontology.text_ontology.llm_settings import build_llm, resolve_llm_config
+    from auto_ontology.text_ontology.pipeline import ingest_document
+    from auto_ontology.text_ontology.sample import FakeLLM
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(home or default_home())
+    settings = store.settings()
+    if settings.last_project_id:
+        try:
+            project = store.load(settings.last_project_id)
+        except (FileNotFoundError, ValueError):
+            project = store.create("Import")
+    else:
+        projects = store.list_projects()
+        project = projects[0] if projects else store.create("Import")
+    config = resolve_llm_config(store)
+    llm = FakeLLM() if fake else build_llm(config)
+    label = "démonstration" if fake else config.model
+    for path in paths:
+        loaded = load_bytes(path.name, path.read_bytes())
+        ingest_document(
+            store,
+            project,
+            loaded,
+            config=config,
+            llm=llm,
+            model_label=label,
+            on_event=lambda _event: None,
+        )
+        project = store.load(project.id)
+        print(f"{path.name} → {project.name} ({len(project.ontology.triplets)} faits)")
+
+
+def ask_project(question: str, *, home: Path | None) -> str:
+    """One sentence and its source, from the current project."""
+    from auto_ontology.text_ontology.query import answer
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(home or default_home())
+    settings = store.settings()
+    project = None
+    if settings.last_project_id:
+        try:
+            project = store.load(settings.last_project_id)
+        except (FileNotFoundError, ValueError):
+            project = None
+    if project is None:
+        projects = store.list_projects()
+        project = projects[0] if projects else None
+    if project is None:
+        return "Aucun projet."
+    payload = answer(project, question)
+    lines = [str(payload["answer"])]
+    for fact in payload["facts"]:
+        if isinstance(fact, dict) and fact.get("quote"):
+            lines.append(f"- {fact['filename']} : {fact['quote']}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

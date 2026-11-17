@@ -53,10 +53,44 @@ says so and still opens the example. Exports (HTML with the graph library
 inlined, Mermaid, Turtle, Cypher, CSV, JSON-LD) are in the Download menu.
 
 Dependencies beyond the existing server are pypdf and python-docx, used only
-to read PDF and DOCX. EPUB and HTML are read with the standard library. What
-is not in this pass: OCR for scanned PDFs, a gold-set score for the prompt,
-and writing the result back into the Postgres catalog. Details:
-[docs/text-ontology.md](docs/text-ontology.md).
+to read PDF and DOCX. EPUB and HTML are read with the standard library.
+
+Several documents in one project are typed (contract, paper, report, chapter,
+financial statement, email, notes) with a confidence, a domain and basic
+metadata. The Documents view shows them; the graph can be filtered by document,
+type, or concepts shared across files. A correction is remembered: renames,
+merges and rejected facts are written into `~/AutoOntology/memory.json` and
+added to the next prompt. That is not model training. `Tableaux HTML` and
+`JSONL` in the Download menu export pinned dashboards and a triplet file that
+could later be used for fine-tuning.
+
+The HTTP API is the same process. Interactive docs: <http://127.0.0.1:4173/docs>.
+Set `ONTOLOGY_API_TOKEN` when the server is reachable beyond this machine;
+clients that are not local must then send `Authorization: Bearer`.
+
+```bash
+curl -s http://127.0.0.1:4173/api/v1/concepts
+curl -s "http://127.0.0.1:4173/api/v1/search?q=Lyon"
+curl -s "http://127.0.0.1:4173/api/v1/concepts/Camille%20Martin/neighbours"
+curl -s http://127.0.0.1:4173/api/v1/facts
+curl -s -X POST http://127.0.0.1:4173/api/v1/ask \
+  -H 'content-type: application/json' \
+  -d '{"question":"qui dirige la bibliothèque"}'
+curl -s "http://127.0.0.1:4173/api/v1/export?format=turtle" -o ontologie.ttl
+```
+
+Other commands, still one install:
+
+```bash
+uv run ontology import contrat.pdf article.txt --fake
+uv run ontology ask "qui dirige la bibliothèque"
+uv run ontology mcp
+uv run ontology serve --watch ~/Documents/a-lire --fake
+```
+
+`ontology mcp` speaks MCP on standard input and only reads the current project.
+What is not in this pass: OCR for scanned PDFs, and writing the result back
+into the Postgres catalog. Details: [docs/text-ontology.md](docs/text-ontology.md).
 
 ## Benchmarks
 

@@ -4,9 +4,10 @@
 
 """The project file the studio saves on disk.
 
-``schema_version`` is 1. A newer file is refused rather than guessed. The
-ontology itself stays the normalized extraction; provenance, documents and
-renames sit beside it, so the LLM schema does not have to carry them.
+``schema_version`` is 1. New fields have defaults, so a file written by the
+first studio still opens. A newer ``schema_version`` is refused rather than
+guessed. The ontology itself stays the normalized extraction; provenance,
+documents and renames sit beside it.
 """
 
 from __future__ import annotations
@@ -65,6 +66,60 @@ class DocumentRecord(BaseModel):
     prompt_version: str = ""
     model: str = ""
     fingerprint: str = ""
+    title: str = ""
+    author: str = ""
+    date: str = ""
+    language: str = ""
+    pages: int = 0
+    genre: str = "notes"
+    genre_confidence: float = 0
+    genre_source: str = "auto"
+    domain: str = ""
+    domain_confidence: float = 0
+
+
+class Alias(BaseModel):
+    """A spelling the person prefers. ``kind`` is entity, class or predicate."""
+
+    kind: str
+    source: str
+    target: str
+
+
+class RejectedFact(BaseModel):
+    """A triplet the person removed. Later extractions are told to skip it."""
+
+    subject: str
+    predicate: str
+    object: str
+    passage: str = ""
+
+
+class Example(BaseModel):
+    """A short passage kept as a reminder in the next prompt."""
+
+    passage: str
+    note: str
+
+
+class ScorePoint(BaseModel):
+    """One reading of quality. Gold precision is set only for the example text."""
+
+    at: str
+    quality: float = 0
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+    note: str = ""
+
+
+class Memory(BaseModel):
+    """Corrections accumulated in one project, or in the home directory."""
+
+    aliases: list[Alias] = Field(default_factory=list)
+    rejected: list[RejectedFact] = Field(default_factory=list)
+    examples: list[Example] = Field(default_factory=list)
+    scores: list[ScorePoint] = Field(default_factory=list)
 
 
 class Project(BaseModel):
@@ -80,6 +135,8 @@ class Project(BaseModel):
     triplets: list[TripletProv] = Field(default_factory=list)
     attributes: list[AttributeProv] = Field(default_factory=list)
     classes: list[ClassProv] = Field(default_factory=list)
+    memory: Memory = Field(default_factory=Memory)
+    pinned_dashboards: list[str] = Field(default_factory=list)
 
 
 class StudioSettings(BaseModel):
@@ -92,6 +149,7 @@ class StudioSettings(BaseModel):
     max_tokens: int = 8192
     chunk_chars: int = 12_000
     last_project_id: str = ""
+    watch_dir: str = ""
 
 
 class Edit(BaseModel):
@@ -109,3 +167,4 @@ class Edit(BaseModel):
     key: str = ""
     value: str = ""
     description: str = ""
+    document_id: str = ""

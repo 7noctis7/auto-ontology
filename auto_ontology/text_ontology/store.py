@@ -22,6 +22,7 @@ from pathlib import Path
 
 from auto_ontology.text_ontology.studio_models import (
     SCHEMA_VERSION,
+    Memory,
     Project,
     StudioSettings,
 )
@@ -63,6 +64,21 @@ class ProjectStore:
             return StudioSettings.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return StudioSettings()
+
+    def load_memory(self) -> Memory:
+        """Corrections shared by every project in this home directory."""
+        path = self.home / "memory.json"
+        if not path.is_file():
+            return Memory()
+        try:
+            return Memory.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return Memory()
+
+    def save_memory(self, memory: Memory) -> None:
+        path = self.home / "memory.json"
+        self._atomic_write(path, memory.model_dump_json(indent=2) + "\n")
+        path.chmod(0o600)
 
     def save_settings(self, settings: StudioSettings) -> None:
         path = self.home / "settings.json"

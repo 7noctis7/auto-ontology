@@ -17,6 +17,7 @@ import io
 import json
 from pathlib import Path
 
+from auto_ontology.text_ontology.analysis import dashboard_html
 from auto_ontology.text_ontology.export import (
     _VIS_NETWORK_URL,
     ExportFormat,
@@ -24,7 +25,9 @@ from auto_ontology.text_ontology.export import (
     to_html,
 )
 from auto_ontology.text_ontology.models import TextOntology
+from auto_ontology.text_ontology.learning import training_rows
 from auto_ontology.text_ontology.studio_models import Project
+from auto_ontology.text_ontology.view import build_view
 
 _VENDOR = (
     Path(__file__).resolve().parent / "app" / "static" / "vendor" / "vis-network.min.js"
@@ -39,6 +42,8 @@ _FORMATS = {
     "csv": ("ontologie.csv", "text/csv; charset=utf-8"),
     "jsonld": ("ontologie.jsonld", "application/ld+json; charset=utf-8"),
     "project": ("projet.json", "application/json; charset=utf-8"),
+    "dashboard": ("tableaux.html", "text/html; charset=utf-8"),
+    "jsonl": ("triplets.jsonl", "application/jsonl; charset=utf-8"),
 }
 
 
@@ -65,6 +70,12 @@ def render_export(project: Project, export_format: str) -> tuple[str, str, str]:
         return to_csv(project), filename, media
     if export_format == "jsonld":
         return to_jsonld(ontology), filename, media
+    if export_format == "dashboard":
+        return _dashboard(project), filename, media
+    if export_format == "jsonl":
+        rows = training_rows(project)
+        body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        return body, filename, media
     rendered = export_ontology(ontology, ExportFormat(export_format), title=title)
     return rendered, filename, media
 
@@ -177,3 +188,16 @@ def to_jsonld(ontology: TextOntology) -> str:
         "@graph": graph,
     }
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+
+
+def _dashboard(project: Project) -> str:
+    view = build_view(
+        project,
+        path="",
+        can_undo=False,
+        can_redo=False,
+        llm={},
+        projects=[],
+    )
+    panels = view.get("analysis")
+    return dashboard_html(project, panels if isinstance(panels, dict) else {})

@@ -24,7 +24,11 @@ uv run ontology serve
 No Postgres and no login. PDF, EPUB, DOCX, HTML, Markdown and plain text are
 accepted. `--fake` runs a deterministic stand-in when no model key is
 available, and the page itself includes an example that does not call a
-model. The CLI below remains the way to script the same extraction.
+model. The page also types each document, offers a guide, proposed
+dashboards, and a read API at `/docs`. Corrections are reused in the next
+prompt; they do not train a model. `ontology import`, `ontology ask` and
+`ontology mcp` script the same project. The CLI below remains the way to
+script one extraction.
 
 ## Output
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from auto_ontology.text_ontology.analysis import annotate_graph, build_panels, genre_ids
 from auto_ontology.text_ontology.export import _graph
 from auto_ontology.text_ontology.provenance import entity_key
 from auto_ontology.text_ontology.studio_models import Project
@@ -132,6 +133,7 @@ def build_view(
                     for key, values in graph.class_attributes.get(name, {}).items()
                 ],
                 "documents": sorted(document_ids),
+                "genres": genre_ids(project, list(document_ids)),
             }
         )
 
@@ -171,6 +173,7 @@ def build_view(
                     for key, values in entity.attributes.items()
                 ],
                 "documents": sorted(document_ids),
+                "genres": genre_ids(project, list(document_ids)),
             }
         )
 
@@ -291,6 +294,16 @@ def build_view(
                 "model": document.model,
                 "noise_ratio": document.noise_ratio,
                 "added_at": document.added_at,
+                "title": document.title,
+                "author": document.author,
+                "date": document.date,
+                "language": document.language,
+                "pages": document.pages,
+                "genre": document.genre,
+                "genre_confidence": document.genre_confidence,
+                "genre_source": document.genre_source,
+                "domain": document.domain,
+                "domain_confidence": document.domain_confidence,
             }
         )
 
@@ -306,6 +319,8 @@ def build_view(
         if len(suggestions) >= 12:
             break
 
+    annotate_graph(nodes, edges)
+    panels = build_panels(project, nodes)
     node_count = len(nodes)
     orphan_count = len(class_orphans) + len(entity_orphans)
     last = per_document[-1] if per_document else None
@@ -351,4 +366,5 @@ def build_view(
         "facts": facts,
         "documents": per_document,
         "suggestions": suggestions,
+        "analysis": panels,
     }
