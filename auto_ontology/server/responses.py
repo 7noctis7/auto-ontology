@@ -63,6 +63,7 @@ from auto_ontology.server.models import (
     Zone,
     ZoneChip,
 )
+from auto_ontology.text_ontology.models import TextOntology
 
 T = TypeVar("T")
 
@@ -249,6 +250,14 @@ class DescriptionSuggestionResponse(_Payload):
     """``data`` is null when no description could be suggested."""
 
     data: str | None
+
+
+class TextOntologyExtractResponse(_Payload):
+    """``data`` is the ontology; ``warnings`` lists what normalization repaired."""
+
+    data: TextOntology
+    warnings: list[str]
+    chunks: int
 
 
 class ColumnAttributePatchResponse(_Payload):

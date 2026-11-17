@@ -43,6 +43,9 @@ from auto_ontology.server.users.router import router as users_router  # noqa: E4
 from auto_ontology.server.zones.router import router as zones_router  # noqa: E402
 from auto_ontology.server.tags.router import router as tags_router  # noqa: E402
 from auto_ontology.server.terms.router import router as terms_router  # noqa: E402
+from auto_ontology.server.text_ontology.router import (  # noqa: E402
+    router as text_ontology_router,
+)
 from auto_ontology.server.model_interchange.router import (  # noqa: E402
     router as model_interchange_router,
 )
@@ -112,6 +115,7 @@ def create_app() -> FastAPI:
         model_interchange_router, prefix="/api", tags=["model-interchange"]
     )
     app.include_router(search_router, prefix="/api", tags=["search"])
+    app.include_router(text_ontology_router, prefix="/api", tags=["text-ontology"])
 
     return app
 

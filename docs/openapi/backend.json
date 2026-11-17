@@ -3002,6 +3002,108 @@
         "title": "ObjectPageResponse[TableColumns]",
         "type": "object"
       },
+      "OntologyAttribute": {
+        "additionalProperties": false,
+        "description": "A literal property of an entity (date, number, identifier...).",
+        "properties": {
+          "entity": {
+            "description": "Entity carrying the attribute.",
+            "title": "Entity",
+            "type": "string"
+          },
+          "key": {
+            "description": "Attribute name in snake_case.",
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "description": "Literal value, as text.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity",
+          "key",
+          "value"
+        ],
+        "title": "OntologyAttribute",
+        "type": "object"
+      },
+      "OntologyClass": {
+        "additionalProperties": false,
+        "description": "A class (concept) of the ontology, with its direct parent.",
+        "properties": {
+          "description": {
+            "default": "",
+            "description": "Short definition.",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Class name in PascalCase, singular.",
+            "title": "Name",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the direct parent class (subClassOf), or null.",
+            "title": "Parent"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OntologyClass",
+        "type": "object"
+      },
+      "OntologyTriplet": {
+        "additionalProperties": false,
+        "description": "An atomic fact ``(subject) -[predicate]-> (object)``.",
+        "properties": {
+          "object": {
+            "description": "Target entity (individual or class).",
+            "title": "Object",
+            "type": "string"
+          },
+          "object_type": {
+            "description": "Class of the object.",
+            "title": "Object Type",
+            "type": "string"
+          },
+          "predicate": {
+            "description": "Relation name in snake_case, active verb.",
+            "title": "Predicate",
+            "type": "string"
+          },
+          "subject": {
+            "description": "Source entity (individual or class).",
+            "title": "Subject",
+            "type": "string"
+          },
+          "subject_type": {
+            "description": "Class of the subject.",
+            "title": "Subject Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "subject_type",
+          "predicate",
+          "object",
+          "object_type"
+        ],
+        "title": "OntologyTriplet",
+        "type": "object"
+      },
       "Owner": {
         "additionalProperties": true,
         "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user. For a group it\nis the caller when they belong to that group, and empty otherwise.\n``color`` is only set for a group.",
@@ -5935,6 +6037,95 @@
           "related_counts"
         ],
         "title": "TermsPageResponse",
+        "type": "object"
+      },
+      "TextOntology": {
+        "additionalProperties": false,
+        "description": "The full extraction result: classes, triplets and literal attributes.",
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyAttribute"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyClass"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "triplets": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyTriplet"
+            },
+            "title": "Triplets",
+            "type": "array"
+          }
+        },
+        "title": "TextOntology",
+        "type": "object"
+      },
+      "TextOntologyExtractRequest": {
+        "properties": {
+          "known_classes": {
+            "description": "Classes that already exist and must be reused, not duplicated.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Classes",
+            "type": "array"
+          },
+          "known_predicates": {
+            "description": "Relations that already exist and must be reused.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Predicates",
+            "type": "array"
+          },
+          "text": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TextOntologyExtractRequest",
+        "type": "object"
+      },
+      "TextOntologyExtractResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the ontology; ``warnings`` lists what normalization repaired.",
+        "properties": {
+          "chunks": {
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "warnings",
+          "chunks"
+        ],
+        "title": "TextOntologyExtractResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -10047,6 +10238,48 @@
         "summary": "List Term Sql Attributes By Id",
         "tags": [
           "terms"
+        ]
+      }
+    },
+    "/api/text-ontology/extract": {
+      "post": {
+        "description": "Extract a formal ontology from free text.\n\n``data`` holds ``classes`` (PascalCase, singular, with their parent),\n``triplets`` (subject, predicate in snake_case, object, each typed by a\nclass) and ``attributes`` (literal values). Only facts stated in the text\nare extracted. ``warnings`` lists what normalization repaired, such as a\nplural class merged into its singular. Nothing is written to the store.\n\nReturns 422 for blank text, 502 when the LLM gives no valid answer, and\n503 when no LLM is configured.",
+        "operationId": "extract_ontology_from_text_api_text_ontology_extract_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyExtractRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyExtractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract Ontology From Text",
+        "tags": [
+          "text-ontology"
         ]
       }
     },
