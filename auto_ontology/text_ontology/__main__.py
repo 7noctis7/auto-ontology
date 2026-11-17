@@ -54,7 +54,7 @@ from auto_ontology.text_ontology.project import (  # noqa: E402
     merge_ontologies,
 )
 
-_COMMANDS = ("extract", "merge", "export")
+_COMMANDS = ("extract", "merge", "export", "serve")
 
 
 class CliError(Exception):
@@ -262,7 +262,35 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--title", help="Title of the HTML page.")
     export.add_argument("--output", "-o", help="Write the export here.")
     export.set_defaults(handler=_export)
+
+    serve = commands.add_parser(
+        "serve",
+        parents=[common],
+        help="Open the local studio in the browser (no database, no login).",
+    )
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=None)
+    serve.add_argument("--no-browser", action="store_true")
+    serve.add_argument("--home", default=None)
+    serve.add_argument(
+        "--fake",
+        action="store_true",
+        help="Demo extraction that does not call a model.",
+    )
+    serve.set_defaults(handler=_serve)
     return parser
+
+
+def _serve(args: argparse.Namespace) -> None:
+    from auto_ontology.text_ontology.studio import serve
+
+    serve(
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+        home=Path(args.home) if args.home else None,
+        fake=args.fake,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

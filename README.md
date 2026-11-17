@@ -16,6 +16,48 @@ It enables developers to:
 - Expose: serve context to any agent harness through MCP, CLI, and API.
 Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
+## Text ontology studio
+
+Drop a document and see its ontology, without Postgres, a login or the chat workers.
+From the repository root:
+
+```bash
+uv run ontology serve
+```
+
+That one command installs the project if needed, starts a local page on
+<http://127.0.0.1:4173> and opens it. Projects are JSON files in `~/AutoOntology`
+(override with `ONTOLOGY_HOME` or `--home`). The same app is
+`uv run python -m auto_ontology.text_ontology serve`.
+
+The page accepts PDF, EPUB, DOCX, HTML, Markdown and plain text, pasted text
+included. Extraction streams chunk by chunk and can be cancelled. The graph
+library is served from the app, so the page works offline apart from the LLM
+call. `ontology serve --fake` draws a graph without calling a model, and the
+empty page offers a built-in example that does not need a key.
+
+The model stays the NVIDIA reasoning default (`REASONING_API_KEY`,
+`REASONING_ENDPOINT`, `REASONING_MODEL`, with the same fallbacks as the rest
+of the product). Point it at any OpenAI-compatible server instead:
+
+```bash
+ONTOLOGY_LLM_API_KEY=sk-... \
+ONTOLOGY_LLM_ENDPOINT=https://api.openai.com/v1 \
+ONTOLOGY_LLM_MODEL=gpt-4o \
+uv run ontology serve
+```
+
+`ONTOLOGY_LLM_*` wins over `REASONING_*`, and both win over the settings file
+the page writes (mode `0600`, under the home directory). With no key, the page
+says so and still opens the example. Exports (HTML with the graph library
+inlined, Mermaid, Turtle, Cypher, CSV, JSON-LD) are in the Download menu.
+
+Dependencies beyond the existing server are pypdf and python-docx, used only
+to read PDF and DOCX. EPUB and HTML are read with the standard library. What
+is not in this pass: OCR for scanned PDFs, a gold-set score for the prompt,
+and writing the result back into the Postgres catalog. Details:
+[docs/text-ontology.md](docs/text-ontology.md).
+
 ## Benchmarks
 
 To run a text-to-SQL benchmark such as BIRD, refer to the
