@@ -176,6 +176,15 @@ def _plural_aliases(names: Sequence[str]) -> dict[str, str]:
     return resolved
 
 
+# Type names a model writes for a literal (a year, a city name) instead of a
+# class. They are not classes: such a triplet states an attribute.
+_LITERAL_TYPES = frozenset({"null", "none", "nil", "na", "literal", "litteral"})
+
+
+def _is_literal_type(name: str | None) -> bool:
+    return name is not None and to_pascal_case(name).casefold() in _LITERAL_TYPES
+
+
 class _ClassNames:
     """Canonical spelling of every class name the extraction mentions."""
 
@@ -185,7 +194,7 @@ class _ClassNames:
         spelling: dict[str, str] = {}
         for mention in mentions:
             pascal = to_pascal_case(mention)
-            if pascal:
+            if pascal and not _is_literal_type(pascal):
                 spelling.setdefault(pascal.casefold(), pascal)
         self._spelling = spelling
         self._aliases = _plural_aliases(list(spelling.values()))
@@ -195,7 +204,7 @@ class _ClassNames:
         if name is None:
             return None
         pascal = to_pascal_case(name)
-        if not pascal:
+        if not pascal or _is_literal_type(pascal):
             return None
         spelled = self._spelling.get(pascal.casefold(), pascal)
         return self._aliases.get(spelled, spelled)
@@ -304,9 +313,13 @@ def normalize_ontology(
         return entity_spelling.setdefault(_entity_key(cleaned), cleaned)
 
     triplets: list[OntologyTriplet] = []
+    literal_facts: list[OntologyTriplet] = []
     for t in raw.triplets:
         subject, obj = entity(t.subject), entity(t.object)
         predicate = normalize_predicate(t.predicate)
+        if _is_literal_type(t.object_type) and not _is_literal_type(t.subject_type):
+            literal_facts.append(t)  # kept below as an attribute
+            continue
         subject_type = names.canonical(t.subject_type)
         object_type = names.canonical(t.object_type)
         if not (subject and obj and predicate and subject_type and object_type):
@@ -382,6 +395,26 @@ def normalize_ontology(
         unique_attributes.setdefault(
             (_entity_key(owner), key, value),
             OntologyAttribute(entity=owner, key=key, value=value),
+        )
+
+    # A triplet whose object is a literal is an attribute. Keep it as one unless
+    # the extraction already states that value for that entity.
+    stated = {(owner, value) for owner, _, value in unique_attributes}
+    for t in literal_facts:
+        owner, key, value = entity(t.subject), to_snake_case(t.predicate), t.object
+        value = _clean_text(value)
+        if not (owner and key and value):
+            warnings.append(f"Dropped an incomplete triplet ({t.subject!r}).")
+            continue
+        if (_entity_key(owner), value) in stated:
+            continue
+        stated.add((_entity_key(owner), value))
+        unique_attributes.setdefault(
+            (_entity_key(owner), key, value),
+            OntologyAttribute(entity=owner, key=key, value=value),
+        )
+        warnings.append(
+            f"Triplet ({owner}, {t.predicate}, {value}) read as an attribute."
         )
 
     ontology = TextOntology(

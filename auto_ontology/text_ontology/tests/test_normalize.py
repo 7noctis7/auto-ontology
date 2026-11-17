@@ -322,3 +322,26 @@ def test_normalization_does_not_mutate_its_input() -> None:
     normalize_ontology(raw)
 
     assert raw.model_dump() == before
+
+
+def test_null_object_type_makes_an_attribute_not_a_class() -> None:
+    ontology, warnings = _normalize(
+        {
+            "triplets": [
+                _triplet("NVIDIA", "Entreprise", "a_ete_fondee_en", "1993", "null"),
+                _triplet("NVIDIA", "Entreprise", "a_siege_a", "Santa Clara", "Null"),
+            ],
+            "attributes": [
+                {"entity": "NVIDIA", "key": "annee_fondation", "value": "1993"}
+            ],
+        }
+    )
+
+    assert "Null" not in _classes(ontology)
+    assert ontology.triplets == []
+    # 1993 is already stated as an attribute; Santa Clara is not.
+    assert [(a.entity, a.key, a.value) for a in ontology.attributes] == [
+        ("NVIDIA", "annee_fondation", "1993"),
+        ("NVIDIA", "a_siege_a", "Santa Clara"),
+    ]
+    assert not any("not declared" in w for w in warnings)
