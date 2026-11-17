@@ -16,6 +16,8 @@ from auto_ontology.text_ontology.models import (
     TextOntology,
 )
 from auto_ontology.text_ontology.normalize import (
+    class_parents,
+    multi_parent_summary,
     normalize_ontology,
     normalize_predicate,
     to_pascal_case,
@@ -207,9 +209,13 @@ def test_est_un_does_not_override_a_declared_parent() -> None:
     )
 
     assert _classes(ontology)["ServeurGPU"].parent == "Serveur"
-    # The second parent survives as the triplet itself.
-    assert ontology.triplets[0].predicate == "est_un"
-    assert any("kept Serveur" in w for w in warnings)
+    # The second parent survives as the triplet itself: multiple inheritance.
+    assert class_parents(ontology)["ServeurGPU"] == ["Serveur", "MaterielInformatique"]
+    assert warnings == []
+    assert multi_parent_summary(ontology) == (
+        "Classes with several parents, check which are right: "
+        "ServeurGPU (Serveur, MaterielInformatique)."
+    )
 
 
 def test_hierarchy_cycles_and_self_parents_are_broken() -> None:
@@ -381,3 +387,80 @@ def test_normalization_is_idempotent() -> None:
 
     assert twice == once
     assert warnings == []
+
+
+def test_a_class_declared_with_two_parents_keeps_both() -> None:
+    ontology, warnings = _normalize(
+        {
+            "classes": [
+                {"name": "ProofOfWorkChain", "parent": "Block", "description": ""},
+                {"name": "ProofOfWorkChain", "parent": "Chaine", "description": ""},
+            ]
+        }
+    )
+
+    assert class_parents(ontology)["ProofOfWorkChain"] == ["Block", "Chaine"]
+    assert _classes(ontology)["ProofOfWorkChain"].parent == "Block"
+    assert {"Block", "Chaine"} <= set(_classes(ontology))
+    assert any("both kept" in w and "Chaine" in w for w in warnings)
+
+
+def test_an_extra_parent_that_would_close_a_cycle_is_removed() -> None:
+    ontology, warnings = _normalize(
+        {
+            "classes": [
+                {"name": "A", "parent": "B", "description": ""},
+                {"name": "B", "parent": None, "description": ""},
+                {"name": "C", "parent": None, "description": ""},
+            ],
+            "triplets": [
+                _triplet("B", "B", "est_un", "C", "C"),
+                _triplet("C", "C", "est_un", "A", "A"),
+            ],
+        }
+    )
+
+    parents = class_parents(ontology)
+    # B est_un C becomes B's parent; C est_un A would close A -> B -> C -> A.
+    assert parents == {"A": ["B"], "B": ["C"], "C": []}
+    assert any("would close a hierarchy cycle" in w for w in warnings)
+
+
+def test_most_specific_type_follows_extra_parents() -> None:
+    ontology, _ = _normalize(
+        {
+            "classes": [
+                {"name": "Produit", "parent": None, "description": ""},
+                {"name": "Materiel", "parent": None, "description": ""},
+                {"name": "ServeurGPU", "parent": "Materiel", "description": ""},
+            ],
+            "triplets": [
+                _triplet("ServeurGPU", "ServeurGPU", "est_un", "Produit", "Produit"),
+                _triplet("DGX", "Produit", "vendu_par", "NVIDIA", "Entreprise"),
+                _triplet("DGX", "ServeurGPU", "contient", "H100", "GPU"),
+            ],
+        }
+    )
+
+    dgx_types = {t.subject_type for t in ontology.triplets if t.subject == "DGX"}
+    assert dgx_types == {"ServeurGPU"}
+
+
+def test_normalization_with_several_parents_is_idempotent() -> None:
+    once, _ = _normalize(
+        {
+            "classes": [
+                {"name": "Coin", "parent": "Transaction", "description": ""},
+                {"name": "Coin", "parent": "Bitcoin", "description": ""},
+            ],
+            "triplets": [_triplet("Coin", "Coin", "est_un", "Signature", "Signature")],
+        }
+    )
+
+    twice, warnings = normalize_ontology(once)
+
+    assert twice == once
+    assert warnings == []
+    parents = class_parents(twice)["Coin"]
+    assert parents[0] == "Transaction"
+    assert set(parents) == {"Transaction", "Bitcoin", "Signature"}

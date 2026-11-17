@@ -203,3 +203,40 @@ def test_a_hand_edited_file_is_normalized_before_export() -> None:
 
     assert ":Personnes a owl:Class" in turtle
     assert ":travaille_pour a owl:ObjectProperty" in turtle
+
+
+def test_html_lists_every_parent_and_every_type() -> None:
+    ontology = TextOntology.model_validate(
+        {
+            "classes": [
+                {"name": "Chaine", "parent": None, "description": ""},
+                {"name": "Block", "parent": None, "description": ""},
+                {"name": "ProofOfWorkChain", "parent": "Block", "description": ""},
+                {"name": "ProofOfWorkChain", "parent": "Chaine", "description": ""},
+            ],
+            "triplets": [
+                {
+                    "subject": "Chaîne principale",
+                    "subject_type": "ProofOfWorkChain",
+                    "predicate": "est_un",
+                    "object": "Chaine",
+                    "object_type": "Chaine",
+                }
+            ],
+        }
+    )
+
+    page = to_html(ontology)
+    payload = re.search(
+        r'<script type="application/json" id="ontology-data">(.*?)</script>', page
+    )
+    assert payload is not None
+    data = json.loads(payload.group(1))
+    by_label = {n["label"]: n for n in data["nodes"]}
+
+    assert by_label["ProofOfWorkChain"]["parents"] == ["Block", "Chaine"]
+    assert by_label["Chaîne principale"]["types"] == ["ProofOfWorkChain", "Chaine"]
+    kinds = [e["kind"] for e in data["edges"]]
+    assert kinds.count("est_un") == 2 and kinds.count("type") == 2
+    # The legend sits outside the graph container, which the library empties.
+    assert page.index('<div id="graph"></div>') < page.index('class="legend"')

@@ -41,10 +41,12 @@ from auto_ontology.text_ontology.export import (  # noqa: E402
     export_ontology,
 )
 from auto_ontology.utils import llm_invoke  # noqa: E402
+from auto_ontology.text_ontology.clean import clean_text  # noqa: E402
 from auto_ontology.text_ontology.extractor import (  # noqa: E402
     DEFAULT_MAX_TOKENS,
     DEFAULT_CHUNK_CHARS,
     TextOntologyExtractionError,
+    resolve_backend,
     extract_text_ontology,
 )
 from auto_ontology.text_ontology.models import TextOntology  # noqa: E402
@@ -54,7 +56,7 @@ from auto_ontology.text_ontology.project import (  # noqa: E402
     merge_ontologies,
 )
 
-_COMMANDS = ("extract", "merge", "export")
+_COMMANDS = ("extract", "merge", "export", "clean")
 
 
 class CliError(Exception):
@@ -111,6 +113,10 @@ def _extract(args: argparse.Namespace) -> None:
     if args.timeout is not None:
         # Read when the client is built, so setting it here is enough.
         llm_invoke.LLM_INVOKE_TIMEOUT_S = args.timeout
+    backend = resolve_backend(
+        provider=args.provider, model=args.model, max_tokens=args.max_tokens
+    )
+    print(f"model: {backend.description}", file=sys.stderr)
     result = extract_text_ontology(
         _read_text(args.inputs),
         known_classes=known_classes,
@@ -119,10 +125,18 @@ def _extract(args: argparse.Namespace) -> None:
         base=base,
         max_tokens=args.max_tokens,
         skip_failed_chunks=args.skip_failed_chunks,
+        clean=args.clean,
+        backend=backend,
     )
     _warn(result.warnings)
     output = args.output or (str(project) if project else None)
     _write(dump_ontology(result.ontology), output)
+
+
+def _clean(args: argparse.Namespace) -> None:
+    result = clean_text(_read_text(args.inputs))
+    print(result.summary() or "Text cleaned: nothing to remove.", file=sys.stderr)
+    _write(result.text, args.output)
 
 
 def _merge(args: argparse.Namespace) -> None:
@@ -226,8 +240,41 @@ def _parser() -> argparse.ArgumentParser:
         help="Skip a chunk the LLM cannot answer instead of failing; the result "
         "is then marked INCOMPLETE in the warnings.",
     )
+    extract.add_argument(
+        "--clean",
+        action="store_true",
+        help="Drop PDF noise first (diagram labels, code, formulas, page numbers, "
+        "references) and rejoin wrapped lines. Preview it with the clean command.",
+    )
+    extract.add_argument(
+        "--provider",
+        choices=["auto", "local", "hosted"],
+        default="auto",
+        help="local: an OpenAI-compatible server such as LM Studio, any model; "
+        "hosted: the application's client. auto picks local for a server on this "
+        "machine or the private network.",
+    )
+    extract.add_argument(
+        "--model",
+        help="Model to use instead of REASONING_MODEL; 'auto' uses the model the "
+        "local server has loaded.",
+    )
     extract.add_argument("--output", "-o", help="Write the JSON here.")
     extract.set_defaults(handler=_extract)
+
+    clean = commands.add_parser(
+        "clean",
+        parents=[common],
+        help="Show the text --clean would extract from, without calling a model.",
+    )
+    clean.add_argument(
+        "inputs",
+        nargs="*",
+        default=["-"],
+        help="Text files to read; '-' (the default) reads standard input.",
+    )
+    clean.add_argument("--output", "-o", help="Write the cleaned text here.")
+    clean.set_defaults(handler=_clean)
 
     merge = commands.add_parser(
         "merge", parents=[common], help="Merge ontology files into one."
@@ -293,6 +340,9 @@ def _configure_output(log_level: str) -> None:
         format="%(levelname)s: %(message)s",
     )
     if log_level != "DEBUG":
+        # One line per HTTP request is transport detail, not progress.
+        for name in ("httpx", "httpcore", "openai"):
+            logging.getLogger(name).setLevel(logging.WARNING)
         for handler in logging.getLogger().handlers:
             handler.addFilter(_NoTraceback())
         # Printed once per chunk for any model the NVIDIA client does not list,

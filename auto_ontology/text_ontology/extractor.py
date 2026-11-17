@@ -14,17 +14,31 @@ created again (rule 1 of the system prompt). The union is then normalized by
 from __future__ import annotations
 
 import logging
+import os
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from auto_ontology.text_ontology.clean import clean_text
+from auto_ontology.text_ontology.local_llm import (
+    LocalChatModel,
+    detect_model,
+    is_local_endpoint,
+)
 from auto_ontology.text_ontology.models import TextOntology, TextOntologyResult
-from auto_ontology.text_ontology.normalize import normalize_ontology
+from auto_ontology.text_ontology.normalize import (
+    multi_parent_summary,
+    normalize_ontology,
+)
+from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from auto_ontology.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +178,82 @@ def _reuse_context(
     return classes, predicates, entities
 
 
+Backend = Callable[[str, str], "TextOntology | None"]
+"""One extraction call: (system prompt, user message) -> ontology, or None."""
+
+
+@dataclass
+class StructuredBackend:
+    """The application's own LLM client, through its structured-output call."""
+
+    client: BaseChatModel
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def description(self) -> str:
+        model = getattr(self.client, "model_name", None) or getattr(
+            self.client, "model", "?"
+        )
+        return f"{model} (hosted)"
+
+    def __call__(self, system: str, user: str) -> TextOntology | None:
+        return invoke_with_structured_output(
+            self.client,
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            TextOntology,
+        )
+
+
+Provider = Literal["auto", "local", "hosted"]
+
+
+def _explicit_model() -> str | None:
+    """The model the environment names, ignoring the built-in hosted defaults."""
+    for name in ("REASONING_MODEL", "DEFAULT_MODELS_MODEL", "MODEL_NAME"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def resolve_backend(
+    *,
+    provider: Provider = "auto",
+    model: str | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+) -> StructuredBackend | LocalChatModel:
+    """The client that will answer, from the ``REASONING_*`` settings.
+
+    ``auto`` talks to a server on this machine or the private network (LM
+    Studio, Ollama, llama.cpp) through :class:`LocalChatModel`, which works
+    with any model they load, and to anything else through the application's
+    client. *model* overrides ``REASONING_MODEL``; ``"auto"``, or no model at
+    all on a local server, uses the model the server has loaded.
+    """
+    endpoint = resolve("REASONING", "ENDPOINT")
+    local = provider == "local" or (
+        provider == "auto" and bool(endpoint) and is_local_endpoint(endpoint)
+    )
+    if local:
+        if not endpoint:
+            raise EnvironmentError("REASONING_ENDPOINT is not set")
+        api_key = resolve("REASONING", "API_KEY") or "local"
+        name = model or _explicit_model()
+        if not name or name == "auto":
+            name = detect_model(endpoint, api_key)
+        return LocalChatModel(
+            base_url=endpoint,
+            model=name,
+            api_key=api_key,
+            timeout=float(llm_invoke.LLM_INVOKE_TIMEOUT_S),
+            max_tokens=max_tokens,
+        )
+    kwargs: dict[str, object] = {"temperature": 0.0, "max_tokens": max_tokens}
+    if model and model != "auto":
+        kwargs["model"] = model
+    return StructuredBackend(get_llm_client(**kwargs))
+
+
 def extract_text_ontology(
     text: str,
     *,
@@ -173,6 +263,8 @@ def extract_text_ontology(
     base: TextOntology | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     skip_failed_chunks: bool = False,
+    clean: bool = False,
+    backend: Backend | None = None,
     llm: BaseChatModel | None = None,
 ) -> TextOntologyResult:
     """Extract and normalize the ontology stated in *text*.
@@ -181,7 +273,11 @@ def extract_text_ontology(
     duplicate, such as glossary terms. *base* is an ontology to grow, such as
     a project file: every chunk is told its names, and the result is *base*
     merged with what the text adds. *max_tokens* caps each answer, which
-    stops a small model that loops. *llm* defaults to the reasoning model.
+    stops a small model that loops. *clean* first drops PDF noise (see
+    :mod:`~auto_ontology.text_ontology.clean`).
+
+    *backend* answers each chunk; it defaults to :func:`resolve_backend`, and
+    *llm* wraps a given chat model in the application's structured call.
 
     Raises ``ValueError`` for blank text, ``EnvironmentError`` when no LLM is
     configured, and :class:`TextOntologyExtractionError` when a chunk gets no
@@ -189,19 +285,27 @@ def extract_text_ontology(
     the result lists it in ``failed_chunks`` and says so in ``warnings``, so a
     partial ontology is never mistaken for a complete one.
     """
+    notes: list[str] = []
+    if clean:
+        cleaned = clean_text(text)
+        text = cleaned.text
+        if (summary := cleaned.summary()) is not None:
+            notes.append(summary)
     chunks = split_text(text, max_chunk_chars)
     if not chunks:
         raise ValueError("text is blank")
 
-    client = (
-        llm
-        if llm is not None
-        else get_llm_client(temperature=0.0, max_tokens=max_tokens)
-    )
-    system = SystemMessage(content=load_system_prompt())
+    if backend is None:
+        backend = (
+            StructuredBackend(llm)
+            if llm is not None
+            else resolve_backend(max_tokens=max_tokens)
+        )
+    system = load_system_prompt()
     # The base goes first so its spellings win when the merge reconciles names.
     collected = base.model_copy(deep=True) if base is not None else TextOntology()
     failed: list[int] = []
+    backend_notes: list[str] = getattr(backend, "notes", [])
 
     for index, chunk in enumerate(chunks, start=1):
         classes, predicates, entities = list(known_classes), [], []
@@ -217,8 +321,11 @@ def extract_text_ontology(
             known_predicates=predicates,
             known_entities=entities,
         )
-        result = invoke_with_structured_output(
-            client, [system, HumanMessage(content=message)], TextOntology
+        seen_notes = len(backend_notes)
+        result = backend(system, message)
+        notes.extend(
+            f"Chunk {index}/{len(chunks)}: {note}"
+            for note in backend_notes[seen_notes:]
         )
         if result is None:
             if not skip_failed_chunks:
@@ -242,6 +349,10 @@ def extract_text_ontology(
         collected.attributes.extend(result.attributes)
 
     ontology, warnings = normalize_ontology(collected, known_classes)
+    # Two chunks can trip the same repair; say it once.
+    warnings = list(dict.fromkeys([*notes, *warnings]))
+    if (summary := multi_parent_summary(ontology)) is not None:
+        warnings.append(summary)
     if failed:
         listed = ", ".join(str(i) for i in failed)
         warnings.insert(

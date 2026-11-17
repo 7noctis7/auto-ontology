@@ -16,7 +16,10 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from auto_ontology.text_ontology.models import TextOntology
-from auto_ontology.text_ontology.normalize import normalize_ontology
+from auto_ontology.text_ontology.normalize import (
+    multi_parent_summary,
+    normalize_ontology,
+)
 
 
 def load_ontology(path: str | Path) -> TextOntology:
@@ -51,4 +54,8 @@ def merge_ontologies(
         union.classes.extend(ontology.classes)
         union.triplets.extend(ontology.triplets)
         union.attributes.extend(ontology.attributes)
-    return normalize_ontology(union, known_classes)
+    ontology, warnings = normalize_ontology(union, known_classes)
+    warnings = list(dict.fromkeys(warnings))
+    if (summary := multi_parent_summary(ontology)) is not None:
+        warnings.append(summary)
+    return ontology, warnings

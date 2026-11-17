@@ -65,6 +65,10 @@ class TextOntologyExtractRequest(BaseModel):
         default=False,
         description="Skip a chunk the LLM cannot answer instead of failing with 502.",
     )
+    clean: bool = Field(
+        default=False,
+        description="Drop PDF noise (diagram labels, code, formulas, references) first.",
+    )
 
 
 class TextOntologyMergeRequest(BaseModel):
@@ -93,6 +97,9 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
     With ``reuse_glossary``, the glossary's Terms are classes to reuse.
     With ``skip_failed_chunks``, a chunk the LLM cannot answer is skipped and
     listed in ``failed_chunks``, and ``warnings`` says the result is incomplete.
+    With ``clean``, PDF noise is dropped and wrapped lines are rejoined first.
+    A model served on the private network (LM Studio, Ollama) is used through
+    its OpenAI-compatible API, whatever model it has loaded.
 
     Returns 422 for blank text, 502 when the LLM gives no valid answer, and
     503 when no LLM is configured.
@@ -107,6 +114,7 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
             known_predicates=body.known_predicates,
             base=body.base,
             skip_failed_chunks=body.skip_failed_chunks,
+            clean=body.clean,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

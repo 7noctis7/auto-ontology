@@ -14139,6 +14139,12 @@
             ],
             "description": "An ontology to grow, such as a project's: the result merges it."
           },
+          "clean": {
+            "default": false,
+            "description": "Drop PDF noise (diagram labels, code, formulas, references) first.",
+            "title": "Clean",
+            "type": "boolean"
+          },
           "known_classes": {
             "description": "Classes that already exist and must be reused, not duplicated.",
             "items": {

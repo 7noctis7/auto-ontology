@@ -63,6 +63,27 @@ def test_glossary_terms_become_pascal_case_class_names(
     assert glossary.glossary_class_names() == ["PurchaseOrder"]
 
 
+class _StubBackend:
+    description = "stub-model"
+    notes: list[str] = []
+
+    def __call__(self, system: str, user: str) -> TextOntology:
+        return TextOntology()
+
+
+@pytest.fixture(autouse=True)
+def _no_model_lookup(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """CLI tests never resolve a real model; they record what was asked."""
+    asked: dict[str, Any] = {}
+
+    def fake_resolve(**kwargs: Any) -> _StubBackend:
+        asked.update(kwargs)
+        return _StubBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", fake_resolve)
+    return asked
+
+
 def _run(args: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
     code = cli.main(args)
     out, err = capsys.readouterr()
@@ -205,3 +226,52 @@ def test_cli_passes_the_local_model_options(
     assert seen["timeout"] == 600
     assert seen["max_tokens"] == 4096
     assert seen["skip_failed_chunks"] is True
+
+
+def test_cli_passes_provider_model_and_clean(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    _no_model_lookup: dict[str, Any],
+) -> None:
+    document = tmp_path / "doc.txt"
+    document.write_text("texte", encoding="utf-8")
+    seen: dict[str, Any] = {}
+
+    def fake_extract(text: str, **kwargs: Any) -> TextOntologyResult:
+        seen.update(kwargs)
+        return TextOntologyResult(ontology=TextOntology())
+
+    monkeypatch.setattr(cli, "extract_text_ontology", fake_extract)
+
+    code, _, err = _run(
+        [str(document), "--provider", "local", "--model", "auto", "--clean"], capsys
+    )
+
+    assert code == 0
+    assert "model: stub-model" in err
+    assert _no_model_lookup == {
+        "provider": "local",
+        "model": "auto",
+        "max_tokens": 8192,
+    }
+    assert seen["clean"] is True
+    assert isinstance(seen["backend"], _StubBackend)
+
+
+def test_cli_clean_previews_the_cleaned_text(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    document = tmp_path / "doc.txt"
+    document.write_text(
+        "Alice works for ACME, a company that builds very reliable rockets.\n"
+        "#include <math.h>\n"
+        "int i, k;\n",
+        encoding="utf-8",
+    )
+
+    code, out, err = _run(["clean", str(document)], capsys)
+
+    assert code == 0
+    assert out == "Alice works for ACME, a company that builds very reliable rockets.\n"
+    assert "2 code lines" in err

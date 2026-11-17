@@ -228,22 +228,55 @@ def _break_cycles(parents: dict[str, str | None], warnings: list[str]) -> None:
             parents[child] = None
 
 
-def _ancestors(name: str, parents: dict[str, str | None]) -> set[str]:
-    """Every class above *name*. The hierarchy must already be acyclic."""
+def _ancestors(name: str, links: dict[str, list[str]]) -> set[str]:
+    """Every class above *name*, through all of its parents."""
     found: set[str] = set()
-    node = parents.get(name)
-    while node is not None and node not in found:
-        found.add(node)
-        node = parents.get(node)
+    pending = list(links.get(name, ()))
+    while pending:
+        node = pending.pop()
+        if node not in found:
+            found.add(node)
+            pending.extend(links.get(node, ()))
     return found
 
 
-def _most_specific(types: set[str], parents: dict[str, str | None]) -> str | None:
+def _most_specific(types: set[str], links: dict[str, list[str]]) -> str | None:
     """The one type in *types* that specializes all the others, if any."""
     for candidate in types:
-        if types - {candidate} <= _ancestors(candidate, parents):
+        if types - {candidate} <= _ancestors(candidate, links):
             return candidate
     return None
+
+
+def class_parents(ontology: TextOntology) -> dict[str, list[str]]:
+    """Every parent of each class: its ``parent``, then its other ``est_un`` links.
+
+    Reads a normalized ontology, where class-level ``est_un`` triplets name
+    their classes exactly.
+    """
+    found = {c.name: [c.parent] if c.parent else [] for c in ontology.classes}
+    for t in ontology.triplets:
+        if (
+            t.predicate == HIERARCHY_PREDICATE
+            and t.subject in found
+            and t.object in found
+            and t.object not in found[t.subject]
+        ):
+            found[t.subject].append(t.object)
+    return found
+
+
+def multi_parent_summary(ontology: TextOntology) -> str | None:
+    """One warning naming the classes with several parents, or ``None``.
+
+    Several parents can be right (multiple inheritance) but are often a small
+    model's mistake, so they are listed for a person to check.
+    """
+    several = {n: ps for n, ps in class_parents(ontology).items() if len(ps) > 1}
+    if not several:
+        return None
+    listed = "; ".join(f"{n} ({', '.join(ps)})" for n, ps in several.items())
+    return f"Classes with several parents, check which are right: {listed}."
 
 
 def normalize_ontology(
@@ -268,6 +301,9 @@ def normalize_ontology(
 
     # --- Classes: one per canonical name, first non-empty value of each field.
     classes: dict[str, OntologyClass] = {}
+    # A second parent is never dropped: it becomes an `est_un` link of its own
+    # (multiple inheritance), and the warning says which one to check.
+    extra_parents: list[tuple[str, str]] = []
     for declared in raw.classes:
         name = names.canonical(declared.name)
         if name is None:
@@ -291,8 +327,9 @@ def normalize_ontology(
         elif parent is not None and parent != existing.parent:
             warnings.append(
                 f"Class {name} has two parents ({existing.parent}, {parent}): "
-                f"kept {existing.parent}."
+                f"both kept, {parent} as an extra est_un link. Check which is right."
             )
+            extra_parents.append((name, parent))
         if not existing.description:
             existing.description = description
 
@@ -304,6 +341,8 @@ def normalize_ontology(
     for cls in list(classes.values()):
         if cls.parent is not None:
             declare(cls.parent, f"is the parent of {cls.name}")
+    for child, parent in extra_parents:
+        declare(parent, f"is a parent of {child}")
 
     # --- Triplets: canonical names, predicate and types; drop incomplete ones.
     entity_spelling: dict[str, str] = {}
@@ -341,6 +380,7 @@ def normalize_ontology(
         )
 
     # --- Hierarchy: `est_un` between two classes is a subclass link (rule 4).
+    class_links: list[OntologyTriplet] = []
     for t in triplets:
         if t.predicate != HIERARCHY_PREDICATE:
             continue
@@ -349,19 +389,51 @@ def normalize_ontology(
             continue
         # A class-level fact names classes, so spell them as the classes are.
         t.subject, t.object = child, parent
-        current = classes[child].parent
-        if current is None:
+        class_links.append(t)
+        # A second parent stated this way is multiple inheritance, kept as is
+        # and reported by `multi_parent_summary`, so re-normalizing a project
+        # does not warn again about every one of them.
+        if classes[child].parent is None:
             classes[child].parent = parent
-        elif current != parent:
-            warnings.append(
-                f"Class {child} est_un {parent}, but its parent is {current}: "
-                f"kept {current}."
-            )
 
     parents = {name: cls.parent for name, cls in classes.items()}
     _break_cycles(parents, warnings)
     for name, cls in classes.items():
         cls.parent = parents[name]
+
+    # Every other parent is an extra `est_un` link, kept unless it would close
+    # a cycle through the parents and the links already kept.
+    links = {name: [p] if p is not None else [] for name, p in parents.items()}
+    dropped: set[int] = set()
+
+    def link(child: str, parent: str, triplet: OntologyTriplet | None) -> None:
+        if parent in links[child]:
+            return
+        if child == parent or child in _ancestors(parent, links):
+            warnings.append(
+                f"Link {child} est_un {parent} would close a hierarchy cycle: removed."
+            )
+            if triplet is not None:
+                dropped.add(id(triplet))
+            return
+        links[child].append(parent)
+        if triplet is None:
+            triplets.append(
+                OntologyTriplet(
+                    subject=child,
+                    subject_type=child,
+                    predicate=HIERARCHY_PREDICATE,
+                    object=parent,
+                    object_type=parent,
+                )
+            )
+
+    for child, parent in extra_parents:
+        link(child, parent, None)
+    for t in class_links:
+        if t.object != classes[t.subject].parent:
+            link(t.subject, t.object, t)
+    triplets = [t for t in triplets if id(t) not in dropped]
 
     # --- One type per individual when its types are one lineage.
     types_of: dict[str, set[str]] = {}
@@ -371,7 +443,7 @@ def normalize_ontology(
     specific = {
         key: best
         for key, types in types_of.items()
-        if len(types) > 1 and (best := _most_specific(types, parents)) is not None
+        if len(types) > 1 and (best := _most_specific(types, links)) is not None
     }
     for t in triplets:
         t.subject_type = specific.get(_entity_key(t.subject), t.subject_type)

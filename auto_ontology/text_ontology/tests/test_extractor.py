@@ -252,6 +252,7 @@ def test_route_returns_the_ontology_envelope(monkeypatch: pytest.MonkeyPatch) ->
         "known_predicates": [],
         "base": None,
         "skip_failed_chunks": False,
+        "clean": False,
     }
 
 
@@ -380,6 +381,7 @@ def test_extract_passes_the_answer_budget_to_the_client(
         return _FakeLLM([{}])
 
     monkeypatch.setattr(extractor, "get_llm_client", fake_client)
+    monkeypatch.setenv("REASONING_ENDPOINT", "https://llm.example.com/v1")
 
     extract_text_ontology("Un texte.", max_tokens=2048)
 
