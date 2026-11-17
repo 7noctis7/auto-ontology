@@ -85,3 +85,7 @@ class TextOntologyResult(BaseModel):
     ontology: TextOntology
     warnings: list[str] = Field(default_factory=list)
     chunks: int = Field(default=1, description="Number of LLM calls made.")
+    failed_chunks: list[int] = Field(
+        default_factory=list,
+        description="Chunks skipped because the LLM gave no valid answer.",
+    )

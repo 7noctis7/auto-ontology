@@ -6169,6 +6169,12 @@
             "title": "Reuse Glossary",
             "type": "boolean"
           },
+          "skip_failed_chunks": {
+            "default": false,
+            "description": "Skip a chunk the LLM cannot answer instead of failing with 502.",
+            "title": "Skip Failed Chunks",
+            "type": "boolean"
+          },
           "text": {
             "maxLength": 200000,
             "minLength": 1,
@@ -6193,6 +6199,13 @@
           "data": {
             "$ref": "#/components/schemas/TextOntology"
           },
+          "failed_chunks": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Failed Chunks",
+            "type": "array"
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -6204,7 +6217,8 @@
         "required": [
           "data",
           "warnings",
-          "chunks"
+          "chunks",
+          "failed_chunks"
         ],
         "title": "TextOntologyExtractResponse",
         "type": "object"
@@ -10414,7 +10428,7 @@
     },
     "/api/text-ontology/extract": {
       "post": {
-        "description": "Extract a formal ontology from free text.\n\n``data`` holds ``classes`` (PascalCase, singular, with their parent),\n``triplets`` (subject, predicate in snake_case, object, each typed by a\nclass) and ``attributes`` (literal values). Only facts stated in the text\nare extracted. ``warnings`` lists what normalization repaired, such as a\nplural class merged into its singular. Nothing is written to the store.\n\nWith ``base``, the text grows that ontology and ``data`` is the merge.\nWith ``reuse_glossary``, the glossary's Terms are classes to reuse.\n\nReturns 422 for blank text, 502 when the LLM gives no valid answer, and\n503 when no LLM is configured.",
+        "description": "Extract a formal ontology from free text.\n\n``data`` holds ``classes`` (PascalCase, singular, with their parent),\n``triplets`` (subject, predicate in snake_case, object, each typed by a\nclass) and ``attributes`` (literal values). Only facts stated in the text\nare extracted. ``warnings`` lists what normalization repaired, such as a\nplural class merged into its singular. Nothing is written to the store.\n\nWith ``base``, the text grows that ontology and ``data`` is the merge.\nWith ``reuse_glossary``, the glossary's Terms are classes to reuse.\nWith ``skip_failed_chunks``, a chunk the LLM cannot answer is skipped and\nlisted in ``failed_chunks``, and ``warnings`` says the result is incomplete.\n\nReturns 422 for blank text, 502 when the LLM gives no valid answer, and\n503 when no LLM is configured.",
         "operationId": "extract_ontology_from_text_api_text_ontology_extract_post",
         "requestBody": {
           "content": {

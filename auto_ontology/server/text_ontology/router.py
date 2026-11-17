@@ -61,6 +61,10 @@ class TextOntologyExtractRequest(BaseModel):
         default=None,
         description="An ontology to grow, such as a project's: the result merges it.",
     )
+    skip_failed_chunks: bool = Field(
+        default=False,
+        description="Skip a chunk the LLM cannot answer instead of failing with 502.",
+    )
 
 
 class TextOntologyMergeRequest(BaseModel):
@@ -87,6 +91,8 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
 
     With ``base``, the text grows that ontology and ``data`` is the merge.
     With ``reuse_glossary``, the glossary's Terms are classes to reuse.
+    With ``skip_failed_chunks``, a chunk the LLM cannot answer is skipped and
+    listed in ``failed_chunks``, and ``warnings`` says the result is incomplete.
 
     Returns 422 for blank text, 502 when the LLM gives no valid answer, and
     503 when no LLM is configured.
@@ -100,6 +106,7 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
             known_classes=known_classes,
             known_predicates=body.known_predicates,
             base=body.base,
+            skip_failed_chunks=body.skip_failed_chunks,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -112,6 +119,7 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
         "data": result.ontology.model_dump(),
         "warnings": result.warnings,
         "chunks": result.chunks,
+        "failed_chunks": result.failed_chunks,
     }
 
 

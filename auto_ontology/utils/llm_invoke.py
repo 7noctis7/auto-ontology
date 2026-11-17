@@ -249,6 +249,11 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        # ChatNVIDIA passes its own `timeout` (60s by default) on every request,
+        # which overrides the session default below. Without this the configured
+        # LLM_INVOKE_TIMEOUT_S never applied, and a slow endpoint -- a local
+        # model writing a long answer -- timed out at 60s whatever was set.
+        timeout=LLM_INVOKE_TIMEOUT_S,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client

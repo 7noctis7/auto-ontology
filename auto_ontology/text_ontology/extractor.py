@@ -34,6 +34,10 @@ _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.txt"
 # answer for a dense chunk stays well inside the client's output budget.
 DEFAULT_CHUNK_CHARS = 12_000
 
+# The answer budget of one call. A small local model can loop on noisy text
+# (diagram labels, code) until it hits this, so the CLI lets it be lowered.
+DEFAULT_MAX_TOKENS = 8192
+
 # How many names of each kind are restated to the next chunk. Past this the
 # list costs more prompt than the reuse it buys.
 _CONTEXT_NAMES_LIMIT = 200
@@ -167,6 +171,8 @@ def extract_text_ontology(
     known_predicates: Sequence[str] = (),
     max_chunk_chars: int = DEFAULT_CHUNK_CHARS,
     base: TextOntology | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    skip_failed_chunks: bool = False,
     llm: BaseChatModel | None = None,
 ) -> TextOntologyResult:
     """Extract and normalize the ontology stated in *text*.
@@ -174,20 +180,28 @@ def extract_text_ontology(
     *known_classes* and *known_predicates* are names to reuse rather than
     duplicate, such as glossary terms. *base* is an ontology to grow, such as
     a project file: every chunk is told its names, and the result is *base*
-    merged with what the text adds. *llm* defaults to the reasoning model.
+    merged with what the text adds. *max_tokens* caps each answer, which
+    stops a small model that loops. *llm* defaults to the reasoning model.
 
     Raises ``ValueError`` for blank text, ``EnvironmentError`` when no LLM is
     configured, and :class:`TextOntologyExtractionError` when a chunk gets no
-    valid answer: a partial ontology is never returned as if it were complete.
+    valid answer. With *skip_failed_chunks* such a chunk is skipped instead:
+    the result lists it in ``failed_chunks`` and says so in ``warnings``, so a
+    partial ontology is never mistaken for a complete one.
     """
     chunks = split_text(text, max_chunk_chars)
     if not chunks:
         raise ValueError("text is blank")
 
-    client = llm if llm is not None else get_llm_client(temperature=0.0)
+    client = (
+        llm
+        if llm is not None
+        else get_llm_client(temperature=0.0, max_tokens=max_tokens)
+    )
     system = SystemMessage(content=load_system_prompt())
     # The base goes first so its spellings win when the merge reconciles names.
     collected = base.model_copy(deep=True) if base is not None else TextOntology()
+    failed: list[int] = []
 
     for index, chunk in enumerate(chunks, start=1):
         classes, predicates, entities = list(known_classes), [], []
@@ -207,9 +221,14 @@ def extract_text_ontology(
             client, [system, HumanMessage(content=message)], TextOntology
         )
         if result is None:
-            raise TextOntologyExtractionError(
-                f"The LLM returned no valid ontology for chunk {index}/{len(chunks)}."
-            )
+            if not skip_failed_chunks:
+                raise TextOntologyExtractionError(
+                    f"The LLM returned no valid ontology for chunk "
+                    f"{index}/{len(chunks)}."
+                )
+            logger.warning("Text ontology chunk %d/%d skipped", index, len(chunks))
+            failed.append(index)
+            continue
         logger.info(
             "Text ontology chunk %d/%d: %d classes, %d triplets, %d attributes",
             index,
@@ -223,4 +242,16 @@ def extract_text_ontology(
         collected.attributes.extend(result.attributes)
 
     ontology, warnings = normalize_ontology(collected, known_classes)
-    return TextOntologyResult(ontology=ontology, warnings=warnings, chunks=len(chunks))
+    if failed:
+        listed = ", ".join(str(i) for i in failed)
+        warnings.insert(
+            0,
+            f"INCOMPLETE: chunk(s) {listed} of {len(chunks)} got no valid answer "
+            "from the LLM and were skipped; their facts are missing.",
+        )
+    return TextOntologyResult(
+        ontology=ontology,
+        warnings=warnings,
+        chunks=len(chunks),
+        failed_chunks=failed,
+    )

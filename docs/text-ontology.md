@@ -47,8 +47,27 @@ REASONING_ENDPOINT=http://127.0.0.1:1234/v1
 REASONING_MODEL=<the id listed by http://127.0.0.1:1234/v1/models>
 ```
 
-The key can be any non-empty value. With a small local model, pass
-`--chunk-chars 5000`, because smaller chunks extract more reliably.
+The key can be any non-empty value.
+
+A local model is slower than a hosted one, and a small one extracts better
+from short chunks. A good starting point is:
+
+```bash
+uv run python -m auto_ontology.text_ontology document.txt \
+  --chunk-chars 5000 --timeout 600 --max-tokens 4096 --skip-failed-chunks \
+  --log-level INFO -o ontologie.json
+```
+
+- `--timeout 600` waits up to ten minutes for one answer. The default is
+  `LLM_INVOKE_TIMEOUT_S`, else 120 seconds, and it can also be set in `.env`.
+- `--max-tokens 4096` stops a model that loops on noisy text (diagram labels,
+  code) instead of letting it run to the limit.
+- `--skip-failed-chunks` keeps going when one chunk gets no valid answer.
+  The result is then marked `INCOMPLETE` in the warnings and names the
+  skipped chunks.
+
+Text pasted from a PDF extracts better once diagram labels, formulas, code and
+the reference list are removed.
 
 ## Command line
 
@@ -81,6 +100,9 @@ uv run python -m auto_ontology.text_ontology export projet.json -f cypher -o imp
 | `--glossary` | Reuses the glossary's Term names as classes, so a document about "orders" lands on the existing `PurchaseOrder` class. It needs the application's database (the `POSTGRES_*` settings). |
 | `--known-class NAME`, `--known-predicate NAME` | Names to reuse. Both are repeatable. |
 | `--chunk-chars N` | Characters of text per LLM call. The default is 12,000. |
+| `--timeout SECONDS` | How long to wait for one LLM answer. The default is `LLM_INVOKE_TIMEOUT_S`, else 120. |
+| `--max-tokens N` | Longest answer per LLM call. The default is 8,192. |
+| `--skip-failed-chunks` | Skips a chunk the LLM cannot answer instead of failing. The result is marked `INCOMPLETE`. |
 | `--log-level INFO` | Prints one line per chunk, so a long extraction shows its progress. |
 
 ## Exports
@@ -103,7 +125,7 @@ All three need `catalog:read`.
 
 | Route | Body | Returns |
 | --- | --- | --- |
-| `POST /api/text-ontology/extract` | `text`, plus optional `known_classes`, `known_predicates`, `reuse_glossary` and `base` (an ontology to grow) | `{data, warnings, chunks}`. It returns 422 for blank text, 502 when the LLM gives no valid answer, and 503 when no LLM is configured. |
+| `POST /api/text-ontology/extract` | `text`, plus optional `known_classes`, `known_predicates`, `reuse_glossary`, `base` (an ontology to grow) and `skip_failed_chunks` | `{data, warnings, chunks, failed_chunks}`. It returns 422 for blank text, 502 when the LLM gives no valid answer, and 503 when no LLM is configured. |
 | `POST /api/text-ontology/merge` | `ontologies` (earliest first) and optional `known_classes` | `{data, warnings}`. No LLM is called. |
 | `POST /api/text-ontology/export` | `ontology`, `format` (`html`, `mermaid`, `turtle` or `cypher`), and optional `base_iri` and `title` | `{data, format, media_type}`, where `data` is the rendered text. |
 
@@ -126,5 +148,6 @@ union.
 Long texts are split into chunks at paragraph and then sentence boundaries.
 Chunks are extracted in order, and each call is given the names found so far,
 so later chunks and later documents reuse them. If any chunk gets no valid
-answer, the whole extraction fails. A partial ontology is never returned as if
-it were complete.
+answer, the whole extraction fails unless `--skip-failed-chunks` is set. Then
+the skipped chunks are listed and the result is marked `INCOMPLETE`. A partial
+ontology is never returned as if it were complete.

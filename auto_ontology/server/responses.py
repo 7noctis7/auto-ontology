@@ -258,6 +258,7 @@ class TextOntologyExtractResponse(_Payload):
     data: TextOntology
     warnings: list[str]
     chunks: int
+    failed_chunks: list[int]
 
 
 class TextOntologyMergeResponse(_Payload):

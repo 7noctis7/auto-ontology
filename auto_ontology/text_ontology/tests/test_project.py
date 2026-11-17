@@ -170,3 +170,38 @@ def test_cli_glossary_failure_is_reported_not_raised(
 
     assert code == 1
     assert "cannot read the Auto-Ontology glossary" in err
+
+
+def test_cli_passes_the_local_model_options(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_ontology.utils import llm_invoke
+
+    document = tmp_path / "doc.txt"
+    document.write_text("texte", encoding="utf-8")
+    seen: dict[str, Any] = {}
+
+    def fake_extract(text: str, **kwargs: Any) -> TextOntologyResult:
+        seen.update(kwargs)
+        seen["timeout"] = llm_invoke.LLM_INVOKE_TIMEOUT_S
+        return TextOntologyResult(ontology=TextOntology())
+
+    monkeypatch.setattr(cli, "extract_text_ontology", fake_extract)
+    monkeypatch.setattr(llm_invoke, "LLM_INVOKE_TIMEOUT_S", 120)
+
+    code, _, _ = _run(
+        [
+            str(document),
+            "--timeout",
+            "600",
+            "--max-tokens",
+            "4096",
+            "--skip-failed-chunks",
+        ],
+        capsys,
+    )
+
+    assert code == 0
+    assert seen["timeout"] == 600
+    assert seen["max_tokens"] == 4096
+    assert seen["skip_failed_chunks"] is True

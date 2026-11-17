@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import warnings
 from pathlib import Path
 
 from auto_ontology.env import load_env
@@ -39,7 +40,9 @@ from auto_ontology.text_ontology.export import (  # noqa: E402
     ExportFormat,
     export_ontology,
 )
+from auto_ontology.utils import llm_invoke  # noqa: E402
 from auto_ontology.text_ontology.extractor import (  # noqa: E402
+    DEFAULT_MAX_TOKENS,
     DEFAULT_CHUNK_CHARS,
     TextOntologyExtractionError,
     extract_text_ontology,
@@ -105,12 +108,17 @@ def _extract(args: argparse.Namespace) -> None:
     known_classes = list(args.known_class)
     if args.glossary:
         known_classes += _glossary()
+    if args.timeout is not None:
+        # Read when the client is built, so setting it here is enough.
+        llm_invoke.LLM_INVOKE_TIMEOUT_S = args.timeout
     result = extract_text_ontology(
         _read_text(args.inputs),
         known_classes=known_classes,
         known_predicates=args.known_predicate,
         max_chunk_chars=args.chunk_chars,
         base=base,
+        max_tokens=args.max_tokens,
+        skip_failed_chunks=args.skip_failed_chunks,
     )
     _warn(result.warnings)
     output = args.output or (str(project) if project else None)
@@ -198,6 +206,26 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_CHUNK_CHARS,
         help=f"Characters of text per LLM call (default {DEFAULT_CHUNK_CHARS}).",
     )
+    extract.add_argument(
+        "--timeout",
+        type=int,
+        metavar="SECONDS",
+        help="Seconds to wait for one LLM answer (default: LLM_INVOKE_TIMEOUT_S, "
+        "else 120). Raise it for a slow local model.",
+    )
+    extract.add_argument(
+        "--max-tokens",
+        type=int,
+        default=DEFAULT_MAX_TOKENS,
+        help=f"Longest answer per LLM call (default {DEFAULT_MAX_TOKENS}); "
+        "lower it to stop a small model that loops.",
+    )
+    extract.add_argument(
+        "--skip-failed-chunks",
+        action="store_true",
+        help="Skip a chunk the LLM cannot answer instead of failing; the result "
+        "is then marked INCOMPLETE in the warnings.",
+    )
     extract.add_argument("--output", "-o", help="Write the JSON here.")
     extract.set_defaults(handler=_extract)
 
@@ -240,13 +268,38 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _with_default_command(list(sys.argv[1:] if argv is None else argv))
     parsed = _parser().parse_args(args)
-    logging.basicConfig(level=getattr(logging, parsed.log_level), stream=sys.stderr)
+    _configure_output(parsed.log_level)
     try:
         parsed.handler(parsed)
     except (CliError, ValueError, OSError, TextOntologyExtractionError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+class _NoTraceback(logging.Filter):
+    """Keep a logged error to its one-line message; DEBUG shows the trace."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+def _configure_output(log_level: str) -> None:
+    logging.basicConfig(
+        level=getattr(logging, log_level),
+        stream=sys.stderr,
+        format="%(levelname)s: %(message)s",
+    )
+    if log_level != "DEBUG":
+        for handler in logging.getLogger().handlers:
+            handler.addFilter(_NoTraceback())
+        # Printed once per chunk for any model the NVIDIA client does not list,
+        # local ones included, while the answer is validated anyway.
+        warnings.filterwarnings(
+            "ignore", message=r".*is not known to support structured output.*"
+        )
 
 
 def _with_default_command(args: list[str]) -> list[str]:

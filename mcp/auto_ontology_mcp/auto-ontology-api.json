@@ -14163,6 +14163,12 @@
             "title": "Reuse Glossary",
             "type": "boolean"
           },
+          "skip_failed_chunks": {
+            "default": false,
+            "description": "Skip a chunk the LLM cannot answer instead of failing with 502.",
+            "title": "Skip Failed Chunks",
+            "type": "boolean"
+          },
           "text": {
             "maxLength": 200000,
             "minLength": 1,
@@ -14185,6 +14191,13 @@
           "data": {
             "$ref": "#/components/schemas/TextOntology"
           },
+          "failed_chunks": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Failed Chunks",
+            "type": "array"
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -14193,7 +14206,7 @@
             "type": "array"
           }
         },
-        "required": ["data", "warnings", "chunks"],
+        "required": ["data", "warnings", "chunks", "failed_chunks"],
         "title": "TextOntologyExtractResponse",
         "type": "object"
       },

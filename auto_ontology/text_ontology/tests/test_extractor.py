@@ -244,12 +244,14 @@ def test_route_returns_the_ontology_envelope(monkeypatch: pytest.MonkeyPatch) ->
         },
         "warnings": ["w"],
         "chunks": 1,
+        "failed_chunks": [],
     }
     assert seen == {
         "text": "Alice est une personne.",
         "known_classes": ["Personne"],
         "known_predicates": [],
         "base": None,
+        "skip_failed_chunks": False,
     }
 
 
@@ -340,3 +342,45 @@ def test_route_maps_extraction_errors(
     response = _client().post("/api/text-ontology/extract", json={"text": "x"})
 
     assert response.status_code == status
+
+
+def test_extract_can_skip_a_failed_chunk_and_says_the_result_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = iter(
+        [
+            None,
+            TextOntology.model_validate(
+                {"classes": [{"name": "Bloc", "parent": None, "description": ""}]}
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        extractor, "invoke_with_structured_output", lambda *_: next(answers)
+    )
+    text = "a" * 40 + "\n\n" + "b" * 40
+
+    result = extract_text_ontology(
+        text, max_chunk_chars=50, skip_failed_chunks=True, llm=_FakeLLM([])
+    )
+
+    assert result.chunks == 2
+    assert result.failed_chunks == [1]
+    assert result.warnings[0].startswith("INCOMPLETE: chunk(s) 1 of 2")
+    assert [c.name for c in result.ontology.classes] == ["Bloc"]
+
+
+def test_extract_passes_the_answer_budget_to_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_client(**kwargs: Any) -> _FakeLLM:
+        seen.update(kwargs)
+        return _FakeLLM([{}])
+
+    monkeypatch.setattr(extractor, "get_llm_client", fake_client)
+
+    extract_text_ontology("Un texte.", max_tokens=2048)
+
+    assert seen == {"temperature": 0.0, "max_tokens": 2048}
