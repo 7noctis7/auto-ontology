@@ -162,6 +162,53 @@ def test_extract_rejects_blank_text() -> None:
         extract_text_ontology("   ", llm=_FakeLLM([]))
 
 
+def test_extract_grows_a_base_ontology_and_reuses_its_names() -> None:
+    base = TextOntology.model_validate(
+        {
+            "classes": [{"name": "Personne", "parent": None, "description": "Humain"}],
+            "triplets": [
+                {
+                    "subject": "Alice",
+                    "subject_type": "Personne",
+                    "predicate": "travaille_pour",
+                    "object": "ACME",
+                    "object_type": "Entreprise",
+                }
+            ],
+        }
+    )
+    llm = _FakeLLM(
+        [
+            {
+                "classes": [{"name": "Personnes", "parent": None, "description": ""}],
+                "triplets": [
+                    {
+                        "subject": "Bob",
+                        "subject_type": "Personnes",
+                        "predicate": "travaille pour",
+                        "object": "Acme",
+                        "object_type": "Entreprise",
+                    }
+                ],
+            }
+        ]
+    )
+
+    result = extract_text_ontology("Bob travaille pour Acme.", base=base, llm=llm)
+
+    message = llm.calls[0][1].content
+    assert "- Classes : Personne, Entreprise" in message
+    assert "- Entités : Alice, ACME" in message
+    ontology = result.ontology
+    assert [c.name for c in ontology.classes] == ["Personne", "Entreprise"]
+    assert [(t.subject, t.object) for t in ontology.triplets] == [
+        ("Alice", "ACME"),
+        ("Bob", "ACME"),
+    ]
+    # The caller's base is not modified.
+    assert len(base.triplets) == 1
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(router_module.router, prefix="/api")
@@ -202,7 +249,76 @@ def test_route_returns_the_ontology_envelope(monkeypatch: pytest.MonkeyPatch) ->
         "text": "Alice est une personne.",
         "known_classes": ["Personne"],
         "known_predicates": [],
+        "base": None,
     }
+
+
+def test_route_adds_glossary_classes_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_extract(text: str, **kwargs: Any) -> TextOntologyResult:
+        seen.update(kwargs)
+        return TextOntologyResult(ontology=TextOntology())
+
+    monkeypatch.setattr(router_module, "extract_text_ontology", fake_extract)
+    monkeypatch.setattr(
+        router_module, "glossary_class_names", lambda: ["PurchaseOrder"]
+    )
+
+    response = _client().post(
+        "/api/text-ontology/extract",
+        json={"text": "x", "known_classes": ["Client"], "reuse_glossary": True},
+    )
+
+    assert response.status_code == 200
+    assert seen["known_classes"] == ["Client", "PurchaseOrder"]
+
+
+def test_route_merges_ontologies() -> None:
+    first = {"classes": [{"name": "Personne", "parent": None, "description": "x"}]}
+    second = {"classes": [{"name": "Personnes", "parent": None, "description": ""}]}
+
+    response = _client().post(
+        "/api/text-ontology/merge", json={"ontologies": [first, second]}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [c["name"] for c in body["data"]["classes"]] == ["Personne"]
+    assert body["warnings"] == ["Class 'Personnes' merged into Personne."]
+
+
+@pytest.mark.parametrize(
+    ("export_format", "media_type", "start"),
+    [
+        ("mermaid", "text/vnd.mermaid", "flowchart LR"),
+        ("turtle", "text/turtle", "@prefix"),
+        ("cypher", "application/x-cypher-query", "// Generated"),
+        ("html", "text/html", "<!doctype html>"),
+    ],
+)
+def test_route_exports(export_format: str, media_type: str, start: str) -> None:
+    response = _client().post(
+        "/api/text-ontology/export",
+        json={"ontology": {"classes": []}, "format": export_format},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["format"] == export_format
+    assert body["media_type"] == media_type
+    assert body["data"].startswith(start)
+
+
+def test_route_export_rejects_a_bad_base_iri() -> None:
+    response = _client().post(
+        "/api/text-ontology/export",
+        json={"ontology": {}, "format": "turtle", "base_iri": "a b"},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(

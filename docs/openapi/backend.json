@@ -2047,6 +2047,16 @@
         "title": "ExplorationRelatedNodes",
         "type": "object"
       },
+      "ExportFormat": {
+        "enum": [
+          "mermaid",
+          "turtle",
+          "cypher",
+          "html"
+        ],
+        "title": "ExportFormat",
+        "type": "string"
+      },
       "ExportRequest": {
         "description": "Export scope: empty ``databases`` exports every catalog database.",
         "properties": {
@@ -6068,8 +6078,73 @@
         "title": "TextOntology",
         "type": "object"
       },
+      "TextOntologyExportRequest": {
+        "properties": {
+          "base_iri": {
+            "default": "http://example.org/auto-ontology#",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Base Iri",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "ontology": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "title": {
+            "default": "Ontologie",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ontology",
+          "format"
+        ],
+        "title": "TextOntologyExportRequest",
+        "type": "object"
+      },
+      "TextOntologyExportResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the rendered export, of content type ``media_type``.",
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "format",
+          "media_type"
+        ],
+        "title": "TextOntologyExportResponse",
+        "type": "object"
+      },
       "TextOntologyExtractRequest": {
         "properties": {
+          "base": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextOntology"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An ontology to grow, such as a project's: the result merges it."
+          },
           "known_classes": {
             "description": "Classes that already exist and must be reused, not duplicated.",
             "items": {
@@ -6087,6 +6162,12 @@
             "maxItems": 1000,
             "title": "Known Predicates",
             "type": "array"
+          },
+          "reuse_glossary": {
+            "default": false,
+            "description": "Also reuse the glossary's Term names as known classes.",
+            "title": "Reuse Glossary",
+            "type": "boolean"
           },
           "text": {
             "maxLength": 200000,
@@ -6126,6 +6207,54 @@
           "chunks"
         ],
         "title": "TextOntologyExtractResponse",
+        "type": "object"
+      },
+      "TextOntologyMergeRequest": {
+        "properties": {
+          "known_classes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Classes",
+            "type": "array"
+          },
+          "ontologies": {
+            "items": {
+              "$ref": "#/components/schemas/TextOntology"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ontologies",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ontologies"
+        ],
+        "title": "TextOntologyMergeRequest",
+        "type": "object"
+      },
+      "TextOntologyMergeResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the merged ontology; ``warnings`` lists what was reconciled.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "warnings"
+        ],
+        "title": "TextOntologyMergeResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -10241,9 +10370,51 @@
         ]
       }
     },
+    "/api/text-ontology/export": {
+      "post": {
+        "description": "Render an ontology as Mermaid, RDF/OWL (Turtle), Neo4j Cypher or HTML.\n\n``data`` is the rendered text and ``media_type`` its content type. The\nHTML page draws an interactive graph and loads its graph library from a\nCDN. Returns 422 for an unusable ``base_iri``.",
+        "operationId": "export_text_ontology_api_text_ontology_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Text Ontology",
+        "tags": [
+          "text-ontology"
+        ]
+      }
+    },
     "/api/text-ontology/extract": {
       "post": {
-        "description": "Extract a formal ontology from free text.\n\n``data`` holds ``classes`` (PascalCase, singular, with their parent),\n``triplets`` (subject, predicate in snake_case, object, each typed by a\nclass) and ``attributes`` (literal values). Only facts stated in the text\nare extracted. ``warnings`` lists what normalization repaired, such as a\nplural class merged into its singular. Nothing is written to the store.\n\nReturns 422 for blank text, 502 when the LLM gives no valid answer, and\n503 when no LLM is configured.",
+        "description": "Extract a formal ontology from free text.\n\n``data`` holds ``classes`` (PascalCase, singular, with their parent),\n``triplets`` (subject, predicate in snake_case, object, each typed by a\nclass) and ``attributes`` (literal values). Only facts stated in the text\nare extracted. ``warnings`` lists what normalization repaired, such as a\nplural class merged into its singular. Nothing is written to the store.\n\nWith ``base``, the text grows that ontology and ``data`` is the merge.\nWith ``reuse_glossary``, the glossary's Terms are classes to reuse.\n\nReturns 422 for blank text, 502 when the LLM gives no valid answer, and\n503 when no LLM is configured.",
         "operationId": "extract_ontology_from_text_api_text_ontology_extract_post",
         "requestBody": {
           "content": {
@@ -10278,6 +10449,48 @@
           }
         },
         "summary": "Extract Ontology From Text",
+        "tags": [
+          "text-ontology"
+        ]
+      }
+    },
+    "/api/text-ontology/merge": {
+      "post": {
+        "description": "Merge several extracted ontologies into one.\n\nDuplicates are reconciled as in a single extraction: classes that differ\nonly by case, accents or a plural ending become one, and so do entities\nspelled two ways. Earlier ontologies win ties, so pass a project's\nontology first. No LLM is called.",
+        "operationId": "merge_text_ontologies_api_text_ontology_merge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyMergeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Text Ontologies",
         "tags": [
           "text-ontology"
         ]

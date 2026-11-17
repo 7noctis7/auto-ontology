@@ -450,6 +450,7 @@ workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 | Authentication, SSO, and API tokens     | [docs/authentication.md](./docs/authentication.md)   |
 | Conversation API                        | [docs/conversation-api.md](./docs/conversation-api.md) |
 | MCP server                              | [docs/mcp.md](./docs/mcp.md)                         |
+| Ontology extraction from text           | [docs/text-ontology.md](./docs/text-ontology.md)     |
 | REST API                                | [docs/openapi/auto-ontology-api.json](./docs/openapi/auto-ontology-api.json) |
 
 ## License

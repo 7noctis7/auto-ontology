@@ -69,7 +69,7 @@ _WORDS = re.compile(r"[A-Z]{2,}s(?![a-z])|[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 _MAX_SINGULAR_COMBINATIONS = 256
 
 
-def _ascii(text: str) -> str:
+def ascii_fold(text: str) -> str:
     """*text* without accents or ligatures. Letters with no ASCII form stay."""
     decomposed = unicodedata.normalize("NFKD", text.translate(_LIGATURES))
     return "".join(c for c in decomposed if not unicodedata.combining(c))
@@ -77,7 +77,7 @@ def _ascii(text: str) -> str:
 
 def _tokens(text: str) -> list[str]:
     """*text* split on separators, accents removed."""
-    return [t for t in _SEPARATORS.split(_ascii(text)) if t]
+    return [t for t in _SEPARATORS.split(ascii_fold(text)) if t]
 
 
 def _words(text: str) -> list[str]:
@@ -119,7 +119,7 @@ def normalize_predicate(name: str) -> str:
 
 def _entity_key(name: str) -> str:
     """Identity of an individual: case, accents and spacing do not count."""
-    return " ".join(_ascii(name).casefold().split())
+    return " ".join(ascii_fold(name).casefold().split())
 
 
 def _clean_text(text: str) -> str:

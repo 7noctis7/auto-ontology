@@ -166,13 +166,15 @@ def extract_text_ontology(
     known_classes: Sequence[str] = (),
     known_predicates: Sequence[str] = (),
     max_chunk_chars: int = DEFAULT_CHUNK_CHARS,
+    base: TextOntology | None = None,
     llm: BaseChatModel | None = None,
 ) -> TextOntologyResult:
     """Extract and normalize the ontology stated in *text*.
 
     *known_classes* and *known_predicates* are names to reuse rather than
-    duplicate, such as the classes of an earlier extraction. *llm* defaults to
-    the reasoning model.
+    duplicate, such as glossary terms. *base* is an ontology to grow, such as
+    a project file: every chunk is told its names, and the result is *base*
+    merged with what the text adds. *llm* defaults to the reasoning model.
 
     Raises ``ValueError`` for blank text, ``EnvironmentError`` when no LLM is
     configured, and :class:`TextOntologyExtractionError` when a chunk gets no
@@ -184,11 +186,12 @@ def extract_text_ontology(
 
     client = llm if llm is not None else get_llm_client(temperature=0.0)
     system = SystemMessage(content=load_system_prompt())
-    collected = TextOntology()
+    # The base goes first so its spellings win when the merge reconciles names.
+    collected = base.model_copy(deep=True) if base is not None else TextOntology()
 
     for index, chunk in enumerate(chunks, start=1):
         classes, predicates, entities = list(known_classes), [], []
-        if index > 1:
+        if collected.classes or collected.triplets:
             so_far, _ = normalize_ontology(collected, known_classes)
             classes, predicates, entities = _reuse_context(so_far, known_classes)
         predicates = list(dict.fromkeys([*known_predicates, *predicates]))

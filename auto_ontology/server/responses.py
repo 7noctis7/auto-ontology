@@ -260,6 +260,21 @@ class TextOntologyExtractResponse(_Payload):
     chunks: int
 
 
+class TextOntologyMergeResponse(_Payload):
+    """``data`` is the merged ontology; ``warnings`` lists what was reconciled."""
+
+    data: TextOntology
+    warnings: list[str]
+
+
+class TextOntologyExportResponse(_Payload):
+    """``data`` is the rendered export, of content type ``media_type``."""
+
+    data: str
+    format: str
+    media_type: str
+
+
 class ColumnAttributePatchResponse(_Payload):
     """``term_certification`` is the owning Term's badge, recomputed on write.
 

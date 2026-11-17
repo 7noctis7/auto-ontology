@@ -7859,6 +7859,174 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/text-ontology/export": {
+      "post": {
+        "description": "Render an ontology as Mermaid, RDF/OWL (Turtle), Neo4j Cypher or an\ninteractive HTML graph. Pure computation on the request body.",
+        "operationId": "post_api_text_ontology_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Text Ontology",
+        "tags": ["text-ontology"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/text-ontology/export/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/text-ontology/extract": {
+      "post": {
+        "description": "Extract an ontology (classes, triplets, attributes) from free text. It reads\nthe glossary when asked to reuse it and writes nothing, so catalog:read is\nenough, the same tier that may list the Terms.",
+        "operationId": "post_api_text_ontology_extract",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyExtractRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyExtractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract an ontology (classes, triplets, attributes) from free text.",
+        "tags": ["text-ontology"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/text-ontology/extract/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/text-ontology/merge": {
+      "post": {
+        "description": "Merge extracted ontologies into one. Pure computation on the request body:\nno store access and no LLM call.",
+        "operationId": "post_api_text_ontology_merge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextOntologyMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextOntologyMergeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge extracted ontologies into one.",
+        "tags": ["text-ontology"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/text-ontology/merge/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/zones": {
       "get": {
         "description": "zonesApi.getAll — list zones (viewable by all).",
@@ -10116,6 +10284,11 @@
         "title": "ExplorationRelatedNodes",
         "type": "object"
       },
+      "ExportFormat": {
+        "enum": ["mermaid", "turtle", "cypher", "html"],
+        "title": "ExportFormat",
+        "type": "string"
+      },
       "ExportRequest": {
         "description": "Export scope: empty ``databases`` exports every catalog database.",
         "properties": {
@@ -10984,6 +11157,102 @@
         },
         "required": ["data", "count", "total"],
         "title": "ObjectPageResponse[TableColumns]",
+        "type": "object"
+      },
+      "OntologyAttribute": {
+        "additionalProperties": false,
+        "description": "A literal property of an entity (date, number, identifier...).",
+        "properties": {
+          "entity": {
+            "description": "Entity carrying the attribute.",
+            "title": "Entity",
+            "type": "string"
+          },
+          "key": {
+            "description": "Attribute name in snake_case.",
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "description": "Literal value, as text.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": ["entity", "key", "value"],
+        "title": "OntologyAttribute",
+        "type": "object"
+      },
+      "OntologyClass": {
+        "additionalProperties": false,
+        "description": "A class (concept) of the ontology, with its direct parent.",
+        "properties": {
+          "description": {
+            "default": "",
+            "description": "Short definition.",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Class name in PascalCase, singular.",
+            "title": "Name",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the direct parent class (subClassOf), or null.",
+            "title": "Parent"
+          }
+        },
+        "required": ["name"],
+        "title": "OntologyClass",
+        "type": "object"
+      },
+      "OntologyTriplet": {
+        "additionalProperties": false,
+        "description": "An atomic fact ``(subject) -[predicate]-> (object)``.",
+        "properties": {
+          "object": {
+            "description": "Target entity (individual or class).",
+            "title": "Object",
+            "type": "string"
+          },
+          "object_type": {
+            "description": "Class of the object.",
+            "title": "Object Type",
+            "type": "string"
+          },
+          "predicate": {
+            "description": "Relation name in snake_case, active verb.",
+            "title": "Predicate",
+            "type": "string"
+          },
+          "subject": {
+            "description": "Source entity (individual or class).",
+            "title": "Subject",
+            "type": "string"
+          },
+          "subject_type": {
+            "description": "Class of the subject.",
+            "title": "Subject Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "subject_type",
+          "predicate",
+          "object",
+          "object_type"
+        ],
+        "title": "OntologyTriplet",
         "type": "object"
       },
       "Owner": {
@@ -13779,6 +14048,196 @@
           }
         },
         "title": "TermUpdate",
+        "type": "object"
+      },
+      "TextOntology": {
+        "additionalProperties": false,
+        "description": "The full extraction result: classes, triplets and literal attributes.",
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyAttribute"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyClass"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "triplets": {
+            "items": {
+              "$ref": "#/components/schemas/OntologyTriplet"
+            },
+            "title": "Triplets",
+            "type": "array"
+          }
+        },
+        "title": "TextOntology",
+        "type": "object"
+      },
+      "TextOntologyExportRequest": {
+        "properties": {
+          "base_iri": {
+            "default": "http://example.org/auto-ontology#",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Base Iri",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "ontology": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "title": {
+            "default": "Ontologie",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": ["ontology", "format"],
+        "title": "TextOntologyExportRequest",
+        "type": "object"
+      },
+      "TextOntologyExportResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the rendered export, of content type ``media_type``.",
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          }
+        },
+        "required": ["data", "format", "media_type"],
+        "title": "TextOntologyExportResponse",
+        "type": "object"
+      },
+      "TextOntologyExtractRequest": {
+        "properties": {
+          "base": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextOntology"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An ontology to grow, such as a project's: the result merges it."
+          },
+          "known_classes": {
+            "description": "Classes that already exist and must be reused, not duplicated.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Classes",
+            "type": "array"
+          },
+          "known_predicates": {
+            "description": "Relations that already exist and must be reused.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Predicates",
+            "type": "array"
+          },
+          "reuse_glossary": {
+            "default": false,
+            "description": "Also reuse the glossary's Term names as known classes.",
+            "title": "Reuse Glossary",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": ["text"],
+        "title": "TextOntologyExtractRequest",
+        "type": "object"
+      },
+      "TextOntologyExtractResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the ontology; ``warnings`` lists what normalization repaired.",
+        "properties": {
+          "chunks": {
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": ["data", "warnings", "chunks"],
+        "title": "TextOntologyExtractResponse",
+        "type": "object"
+      },
+      "TextOntologyMergeRequest": {
+        "properties": {
+          "known_classes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Known Classes",
+            "type": "array"
+          },
+          "ontologies": {
+            "items": {
+              "$ref": "#/components/schemas/TextOntology"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ontologies",
+            "type": "array"
+          }
+        },
+        "required": ["ontologies"],
+        "title": "TextOntologyMergeRequest",
+        "type": "object"
+      },
+      "TextOntologyMergeResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is the merged ontology; ``warnings`` lists what was reconciled.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TextOntology"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": ["data", "warnings"],
+        "title": "TextOntologyMergeResponse",
         "type": "object"
       },
       "ValidationError": {

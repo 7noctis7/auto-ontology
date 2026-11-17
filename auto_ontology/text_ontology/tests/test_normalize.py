@@ -345,3 +345,39 @@ def test_null_object_type_makes_an_attribute_not_a_class() -> None:
         ("NVIDIA", "a_siege_a", "Santa Clara"),
     ]
     assert not any("not declared" in w for w in warnings)
+
+
+def test_normalization_is_idempotent() -> None:
+    once, _ = _normalize(
+        {
+            "classes": [
+                {"name": "Personnes", "parent": None, "description": "x"},
+                {"name": "Personne", "parent": None, "description": ""},
+                {"name": "ServeurGPU", "parent": None, "description": ""},
+                {
+                    "name": "MaterielInformatique",
+                    "parent": "ServeurGPU",
+                    "description": "",
+                },
+            ],
+            "triplets": [
+                _triplet(
+                    "Serveur GPU",
+                    "ServeurGPU",
+                    "is a",
+                    "Matériel informatique",
+                    "MaterielInformatique",
+                ),
+                _triplet("NVIDIA", "Organisation", "emploie", "Alice", "Personnes"),
+                _triplet("Nvidia", "Entreprise", "fondee_en", "1993", "null"),
+            ],
+            "attributes": [
+                {"entity": "nvidia", "key": "Siège", "value": "Santa Clara"}
+            ],
+        }
+    )
+
+    twice, warnings = normalize_ontology(once)
+
+    assert twice == once
+    assert warnings == []
