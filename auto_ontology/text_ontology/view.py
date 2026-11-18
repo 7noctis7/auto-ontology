@@ -17,6 +17,11 @@ from collections import Counter, defaultdict
 
 from auto_ontology.text_ontology.analysis import annotate_graph, build_panels, genre_ids
 from auto_ontology.text_ontology.schema_layer import infer_base_type, sync_schema
+from auto_ontology.text_ontology.standards import (
+    alignment_suggestions,
+    competency_rows,
+    shacl_checks,
+)
 from auto_ontology.text_ontology.export import _graph
 from auto_ontology.text_ontology.provenance import entity_key
 from auto_ontology.text_ontology.studio_models import Project
@@ -414,4 +419,10 @@ def build_view(
         "object_sets": [item.model_dump() for item in project.object_sets],
         "action_log": [item.model_dump() for item in project.action_log[-30:]],
         "notes": [item.model_dump() for item in project.notes],
+        "standards": {
+            "checks": [item.model_dump() for item in shacl_checks(project)],
+            "alignments": alignment_suggestions(project),
+            "questions": competency_rows(project),
+            "base_iri": project.base_iri,
+        },
     }

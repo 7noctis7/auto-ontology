@@ -36,6 +36,22 @@
     }
     root.querySelector("#schema-q").addEventListener("input", paint);
     paint();
+    var standards = state.standards || {};
+    var links = standards.alignments || [];
+    if (links.length) {
+      root.append(el("h3", {}, [lang() === "fr" ? "Vocabulaires proches" : "Nearby vocabularies"]));
+      root.append(el("p", { class: "muted" }, [lang() === "fr"
+        ? "Suggestions seulement. Rien n'est aligné tant que vous ne le retenez pas."
+        : "Suggestions only. Nothing is aligned until you keep it."]));
+      links.forEach(function (item) {
+        root.append(el("p", {}, [
+          item.source + " → " + item.prefix + (item.accepted ? " · retenu" : ""),
+          item.accepted ? null : el("button", { type: "button", onclick: function () {
+            ui().postJson("/api/v1/mappings", { source: item.source, iri: item.iri, predicate: item.predicate });
+          } }, [lang() === "fr" ? "Retenir" : "Keep"])
+        ]));
+      });
+    }
     return root;
   }
 
@@ -172,7 +188,11 @@
         body: JSON.stringify({ start: label, depth: Number(depth.value) || 1, direction: "both" })
       }).then(function (r) { return r.json(); }).then(function (body) {
         var note = body.truncated ? (lang() === "fr" ? "Plafond atteint. " : "Cap reached. ") : "";
-        ui().setFilter({ kind: "ids", value: body.nodes || [] });
+        ui().setFilter({
+          kind: "ids",
+          value: body.nodes || [],
+          label: (lang() === "fr" ? "Autour de " : "Around ") + label
+        });
         var graph = document.querySelector(".views button[data-view='graph']");
         if (graph) graph.click();
         if (note) window.alert(note + (body.nodes || []).length);
@@ -189,16 +209,7 @@
           if (pair.a !== label && pair.b !== label) return;
           var other = pair.a === label ? pair.b : pair.a;
           nearOut.append(el("button", { type: "button", onclick: function () {
-            fetch("/api/v1/actions/merge/preview", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ source: label, target: other })
-            }).then(function (r) { return r.json(); }).then(function (diff) {
-              var text = (diff.summary || "") + "\n" + (diff.removed || []).join(", ");
-              if (window.confirm(text)) {
-                ui().postJson("/api/v1/actions/merge/apply", { source: label, target: other });
-              }
-            });
+            ui().previewAction("merge", { source: label, target: other });
           } }, [other + " · " + pair.score]));
         });
       });
@@ -219,7 +230,11 @@
     function paint(body) {
       bar.replaceChildren();
       bar.append(document.createTextNode((body.active || "main") + " "));
-      var make = el("button", { type: "button" }, ["+"]);
+      var make = el("button", {
+        type: "button",
+        "aria-label": lang() === "fr" ? "Nouvelle branche" : "New branch",
+        title: lang() === "fr" ? "Nouvelle branche" : "New branch"
+      }, ["+"]);
       make.addEventListener("click", function () {
         var name = window.prompt(lang() === "fr" ? "Branche" : "Branch", "essai");
         if (!name) return;
@@ -250,13 +265,4 @@
     branchBar();
   });
 
-  window.addEventListener("keydown", function (event) {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      var button = document.querySelector(".views button[data-view='schema']");
-      if (button) button.click();
-      var input = document.getElementById("schema-q");
-      if (input) input.focus();
-    }
-  });
 })();

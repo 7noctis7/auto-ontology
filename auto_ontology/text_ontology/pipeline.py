@@ -16,8 +16,6 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from pathlib import Path
-
 from langchain_core.language_models import BaseChatModel
 
 from auto_ontology.text_ontology.cache import FileChunkCache
@@ -35,7 +33,7 @@ from auto_ontology.text_ontology.learning import (
     record_score,
 )
 from auto_ontology.text_ontology.llm_settings import LlmConfig
-from auto_ontology.text_ontology.profile import profile_text
+from auto_ontology.text_ontology.profile import profile_text, project_name_from
 from auto_ontology.text_ontology.models import TextOntology
 from auto_ontology.text_ontology.mutations import absorb_provenance
 from auto_ontology.text_ontology.normalize import normalize_ontology
@@ -108,12 +106,11 @@ def ingest_document(
         return project
 
     store.save(project, snapshot=True)
-    if not project.documents and project.name in {
+    naming = not project.documents and project.name in {
         "Brouillon",
         "Nouveau projet",
         "New project",
-    }:
-        project.name = Path(loaded.filename).name or project.name
+    }
     if previous is not None:
         project.documents = [
             document for document in project.documents if document.id != previous.id
@@ -135,6 +132,8 @@ def ingest_document(
         fingerprint=stamp,
     )
     _apply_profile(document, loaded)
+    if naming:
+        project.name = project_name_from(document.title, document.filename)
     project.documents.append(document)
     store.remember_upload(project.id, document.id, loaded.filename, loaded.original)
     store.save(project, snapshot=False)

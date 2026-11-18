@@ -28,7 +28,6 @@ from enum import StrEnum
 from auto_ontology.text_ontology.models import OntologyTriplet, TextOntology
 from auto_ontology.text_ontology.normalize import (
     HIERARCHY_PREDICATE,
-    ascii_fold,
     normalize_ontology,
 )
 
@@ -235,28 +234,33 @@ def to_mermaid(ontology: TextOntology) -> str:
 # RDF / OWL (Turtle)
 # ---------------------------------------------------------------------------
 
-_LOCAL_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
-
 
 class _LocalNames:
-    """One IRI local name per distinct name, unique within the namespace."""
+    """One IRI local name per (kind, label), unique within the namespace.
+
+    Classes and individuals never share an IRI, even when the text uses the
+    same word for both. Fragments are CamelCase, without underscores.
+    """
 
     def __init__(self) -> None:
-        self._by_name: dict[str, str] = {}
+        from auto_ontology.text_ontology.standards import local_name
+
+        self._local = local_name
+        self._by_name: dict[tuple[str, str], str] = {}
         self._used: set[str] = set()
 
-    def __call__(self, name: str) -> str:
-        known = self._by_name.get(name)
+    def __call__(self, name: str, kind: str = "individual") -> str:
+        key = (kind, name)
+        known = self._by_name.get(key)
         if known is not None:
             return known
-        local = _LOCAL_UNSAFE.sub("_", ascii_fold(name)).strip("_") or "x"
-        if local[0] == "-":
-            local = "n" + local
+        local = self._local(name, kind)
         candidate, suffix = local, 2
         while candidate in self._used:
-            candidate, suffix = f"{local}_{suffix}", suffix + 1
+            candidate = f"{local}{suffix}"
+            suffix += 1
         self._used.add(candidate)
-        self._by_name[name] = candidate
+        self._by_name[key] = candidate
         return candidate
 
 
@@ -283,30 +287,60 @@ def _turtle_iri(base_iri: str) -> str:
     return f"<{base_iri}>"
 
 
-def to_turtle(ontology: TextOntology, base_iri: str = DEFAULT_BASE_IRI) -> str:
-    """RDF/OWL in Turtle: classes, properties and named individuals.
+def _lang_literal(text: str, lang: str) -> str:
+    return f"{_turtle_string(text)}@{lang}"
 
-    Classes become ``owl:Class`` with ``rdfs:subClassOf``; relation predicates
-    become ``owl:ObjectProperty`` and attribute keys ``owl:DatatypeProperty``.
-    No domain or range is stated: the text gives examples, not a schema.
+
+def to_turtle(
+    ontology: TextOntology,
+    base_iri: str = DEFAULT_BASE_IRI,
+    *,
+    title: str = "",
+    created: str = "",
+    creator: str = "",
+    language: str = "fr",
+    aliases: dict[str, list[str]] | None = None,
+) -> str:
+    """OWL 2 / RDFS Turtle.
+
+    Classes use ``rdfs:subClassOf``. Individuals use ``rdf:type`` (written
+    ``a``). A class and an individual never share an IRI. Object and datatype
+    properties carry a domain and a range when every use agrees. Labels stay
+    in the source language; the IRI fragment is CamelCase.
     """
+    from auto_ontology.text_ontology.standards import (
+        inverse_name,
+        is_symmetric,
+        is_transitive,
+    )
+
     graph = _graph(ontology)
     local = _LocalNames()
+    aliases = aliases or {}
 
-    def ref(name: str) -> str:
-        return f":{local(name)}"
+    def ref(name: str, kind: str) -> str:
+        return f":{local(name, kind)}"
 
     lines = [
         f"@prefix : {_turtle_iri(base_iri)} .",
         "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
         "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .",
         "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
         "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
+        "@prefix dcterms: <http://purl.org/dc/terms/> .",
+        "@prefix prov: <http://www.w3.org/ns/prov#> .",
         "",
-        f"{_turtle_iri(base_iri.rstrip('#/'))} a owl:Ontology .",
+        f"{_turtle_iri(base_iri.rstrip('#/'))} a owl:Ontology ;",
+        '    owl:versionInfo "1" ;',
+        f"    dcterms:title {_turtle_string(title or 'Ontologie')} .",
         "",
         "# Classes",
     ]
+    if created:
+        lines.insert(-3, f"    dcterms:created {_turtle_string(created)} ;")
+    if creator:
+        lines.insert(-3, f"    dcterms:creator {_turtle_string(creator)} ;")
     parents: dict[str, list[str]] = {name: [] for name in graph.classes}
     for name, parent in graph.classes.items():
         if parent is not None:
@@ -314,13 +348,33 @@ def to_turtle(ontology: TextOntology, base_iri: str = DEFAULT_BASE_IRI) -> str:
     for child, parent in graph.extra_parents:
         parents[child].append(parent)
     for name in graph.classes:
-        facts = ["a owl:Class", f"rdfs:label {_turtle_string(name)}"]
+        facts = [
+            "a owl:Class",
+            f"rdfs:label {_turtle_string(name)}",
+            f"skos:prefLabel {_lang_literal(name, language)}",
+        ]
+        for alt in aliases.get(name, []):
+            facts.append(f"skos:altLabel {_lang_literal(alt, language)}")
         if name in graph.descriptions:
-            facts.append(f"rdfs:comment {_turtle_string(graph.descriptions[name])}")
-        facts.extend(f"rdfs:subClassOf {ref(p)}" for p in parents[name])
-        for key, values in graph.class_attributes.get(name, {}).items():
-            facts.extend(f"{ref(key)} {_turtle_literal(v)}" for v in values)
-        lines.append(f"{ref(name)} " + " ;\n    ".join(facts) + " .")
+            comment = _turtle_string(graph.descriptions[name])
+            facts.append(f"rdfs:comment {comment}")
+            facts.append(f"skos:definition {comment}")
+        facts.extend(
+            f"rdfs:subClassOf {ref(parent, 'class')}" for parent in parents[name]
+        )
+        lines.append(f"{ref(name, 'class')} " + " ;\n    ".join(facts) + " .")
+
+    domains: dict[str, set[str]] = {}
+    ranges: dict[str, set[str]] = {}
+    for triplet in graph.relations:
+        domains.setdefault(triplet.predicate, set()).add(triplet.subject_type)
+        ranges.setdefault(triplet.predicate, set()).add(triplet.object_type)
+    data_domain: dict[str, set[str]] = {}
+    data_range: dict[str, set[str]] = {}
+    for found in graph.entities.values():
+        for key, values in found.attributes.items():
+            data_domain.setdefault(key, set()).update(found.types)
+            data_range.setdefault(key, set()).update(_literal_kind(v) for v in values)
 
     object_properties = list(dict.fromkeys(t.predicate for t in graph.relations))
     datatype_properties = list(
@@ -334,33 +388,67 @@ def to_turtle(ontology: TextOntology, base_iri: str = DEFAULT_BASE_IRI) -> str:
     if object_properties or datatype_properties:
         lines += ["", "# Properties"]
     for name in object_properties:
-        lines.append(
-            f"{ref(name)} a owl:ObjectProperty ; rdfs:label {_turtle_string(name)} ."
-        )
+        facts = [
+            "a owl:ObjectProperty",
+            f"rdfs:label {_turtle_string(name)}",
+            f"skos:prefLabel {_lang_literal(name, language)}",
+        ]
+        domain = domains.get(name, set())
+        span = ranges.get(name, set())
+        if len(domain) == 1 and "" not in domain:
+            facts.append(f"rdfs:domain {ref(next(iter(domain)), 'class')}")
+        if len(span) == 1 and "" not in span:
+            facts.append(f"rdfs:range {ref(next(iter(span)), 'class')}")
+        inverse = inverse_name(name)
+        if inverse:
+            facts.append(f"owl:inverseOf {ref(inverse, 'property')}")
+        if is_symmetric(name):
+            facts.append("a owl:SymmetricProperty")
+        if is_transitive(name):
+            facts.append("a owl:TransitiveProperty")
+        lines.append(f"{ref(name, 'property')} " + " ;\n    ".join(facts) + " .")
     for name in datatype_properties:
-        lines.append(
-            f"{ref(name)} a owl:DatatypeProperty ; rdfs:label {_turtle_string(name)} ."
-        )
+        facts = [
+            "a owl:DatatypeProperty",
+            f"rdfs:label {_turtle_string(name)}",
+            f"skos:prefLabel {_lang_literal(name, language)}",
+        ]
+        domain = data_domain.get(name, set())
+        kinds = data_range.get(name, set())
+        if len(domain) == 1:
+            facts.append(f"rdfs:domain {ref(next(iter(domain)), 'class')}")
+        if len(kinds) == 1 and "string" not in kinds:
+            facts.append(f"rdfs:range xsd:{next(iter(kinds))}")
+        lines.append(f"{ref(name, 'property')} " + " ;\n    ".join(facts) + " .")
 
     stated: dict[str, list[str]] = {}
     for individual, class_name in graph.stated_types:
         stated.setdefault(individual, []).append(class_name)
     outgoing: dict[str, list[OntologyTriplet]] = {}
-    for t in graph.relations:
-        outgoing.setdefault(t.subject, []).append(t)
+    for triplet in graph.relations:
+        outgoing.setdefault(triplet.subject, []).append(triplet)
 
     if graph.entities:
         lines += ["", "# Individuals"]
     for found in graph.entities.values():
         types = list(dict.fromkeys([*found.types, *stated.get(found.name, [])]))
-        facts = ["a owl:NamedIndividual" + "".join(f" , {ref(t)}" for t in types)]
+        typed = "".join(f" , {ref(type_name, 'class')}" for type_name in types)
+        facts = ["a owl:NamedIndividual" + typed]
         facts.append(f"rdfs:label {_turtle_string(found.name)}")
+        facts.append(f"skos:prefLabel {_lang_literal(found.name, language)}")
+        for alt in aliases.get(found.name, []):
+            facts.append(f"skos:altLabel {_lang_literal(alt, language)}")
         facts.extend(
-            f"{ref(t.predicate)} {ref(t.object)}" for t in outgoing.get(found.name, [])
+            f"{ref(item.predicate, 'property')} {ref(item.object, 'individual')}"
+            for item in outgoing.get(found.name, [])
         )
         for key, values in found.attributes.items():
-            facts.extend(f"{ref(key)} {_turtle_literal(v)}" for v in values)
-        lines.append(f"{ref(found.name)} " + " ;\n    ".join(facts) + " .")
+            facts.extend(
+                f"{ref(key, 'property')} {_turtle_literal(value)}" for value in values
+            )
+        lines.append(
+            f"{ref(found.name, 'individual')} " + " ;\n    ".join(facts) + " ."
+        )
     return "\n".join(lines) + "\n"
 
 

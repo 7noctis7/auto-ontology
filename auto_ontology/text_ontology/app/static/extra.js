@@ -39,7 +39,8 @@
       ["Pipeline", "Lecture, nettoyage, morceaux, extraction, normalisation, fusion. Des attentes (échecs, citations, cycles) marquent le document incomplet sans effacer le reste. Un PDF sans texte prévient si Tesseract est absent."],
       ["API et client", "/docs décrit l'API. /api/tester interroge un type. ontology sdk écrit un client Python. Hors de cette machine, le jeton est requis et l'écriture reste coupée sans ONTOLOGY_API_ALLOW_WRITE=1."],
       ["Branches", "Une branche est une copie du projet. On y essaie une extraction ou des fusions, on compare, on fusionne vers main ou on jette. Jeter ne modifie pas main."],
-      ["Similarité", "Un index local (trigrammes, pas un modèle téléchargé) propose des candidats de fusion et une recherche par phrase. Rien n'est fusionné tout seul."]
+      ["Similarité", "Un index local (trigrammes, pas un modèle téléchargé) propose des candidats de fusion et une recherche par phrase. Rien n'est fusionné tout seul. Une classe n'est jamais proposée comme double d'un individu."],
+      ["Bonnes pratiques d'ontologie", "Le schéma (classes, propriétés, sous-classes) reste distinct des individus. L'export Turtle est de l'OWL 2 : rdfs:label et skos:prefLabel en français, propriétés objet ou données, domaine et portée quand ils sont univoques, PROV pour le document et l'extraction. Les noms d'IRI sont en CamelCase ; le libellé français est conservé. Le pipeline affiche un rapport (cycles de sous-classe, classes orphelines, définitions, libellés, domaine). Les correspondances FOAF, schema.org ou Dublin Core sont des suggestions : rien n'est aligné tout seul. Une question de compétence, saisie plus bas, dit si les faits actuels peuvent y répondre."]
     ],
     en: [
       ["An ontology, in two lines", "The vocabulary of the corpus: concepts, individuals, and the facts that link them. The graph shows the facts; the glossary gives the words a meaning."],
@@ -60,7 +61,8 @@
       ["Pipeline", "Read, clean, chunk, extract, normalize, merge. Expectations (failures, citations, cycles) mark the document incomplete without deleting the rest. A textless PDF warns when Tesseract is missing."],
       ["API and client", "/docs describes the API. /api/tester queries a type. ontology sdk writes a Python client. Off this machine the token is required, and writes stay off without ONTOLOGY_API_ALLOW_WRITE=1."],
       ["Branches", "A branch is a copy of the project. Try an extraction or some merges, compare, merge into main, or discard. Discard does not change main."],
-      ["Similarity", "A local index (trigrams, not a downloaded model) suggests merge candidates and a phrase search. Nothing is merged on its own."]
+      ["Similarity", "A local index (trigrams, not a downloaded model) suggests merge candidates and a phrase search. Nothing is merged on its own. A class is never offered as a duplicate of an individual."],
+      ["Ontology practice", "The schema (classes, properties, subclasses) stays apart from individuals. Turtle export is OWL 2: rdfs:label and skos:prefLabel, object or datatype properties, domain and range when every use agrees, PROV for the document and the extraction. IRI names are CamelCase; the French label is kept. The pipeline shows a report (subclass cycles, orphan classes, definitions, labels, domain). FOAF, schema.org and Dublin Core links are suggestions and are never applied on their own. A competency question, entered below, says whether the current facts can answer it."]
     ]
   };
 
@@ -96,6 +98,15 @@
         ? "Le type et le domaine sont estimés. Vous pouvez les corriger."
         : "Type and domain are estimates. You can correct them."])
     ]);
+    var checks = (state.standards && state.standards.checks) || [];
+    if (checks.length) {
+      root.append(el("h3", {}, [lang() === "fr" ? "Qualité du schéma" : "Schema quality"]));
+      checks.forEach(function (item) {
+        root.append(el("p", { class: item.status === "failed" ? "bad" : "muted" }, [
+          item.name + " — " + item.detail
+        ]));
+      });
+    }
     var picks = [];
     (state.documents || []).forEach(function (doc) {
       var select = el("select", { "aria-label": "Type" }, Object.keys(GENRE.fr).map(function (id) {
@@ -191,14 +202,15 @@
     var max = items.reduce(function (acc, item) { return Math.max(acc, item.count || 0); }, 1);
     var box = el("div", { class: "bars" }, []);
     items.forEach(function (item) {
-      var width = Math.round(100 * (item.count || 0) / max);
+      var width = Math.max(item.count ? 4 : 0, Math.round(100 * (item.count || 0) / max));
       box.append(el("div", { class: "bar-row" }, [
-        el("button", { type: "button" }, [
+        el("button", { type: "button", class: "bar-hit" }, [
+          el("span", { class: "bar-name" }, [item.name || ""]),
           el("span", { class: "track" }, [
             el("span", { class: "fill", style: "width:" + width + "%" }, [])
-          ])
-        ]),
-        el("em", {}, [(item.name || "") + " " + (item.count || 0)])
+          ]),
+          el("em", {}, [String(item.count || 0)])
+        ])
       ]));
     });
     return box;
@@ -271,6 +283,35 @@
       root.append(el("h3", {}, [section[0]]));
       root.append(el("p", {}, [section[1]]));
     });
+    var standards = (ui() && ui().state && ui().state.standards) || {};
+    root.append(el("h3", {}, [lang() === "fr" ? "Questions de compétence" : "Competency questions"]));
+    (standards.questions || []).forEach(function (item) {
+      root.append(el("p", {}, [
+        (item.answerable ? "● " : "○ ") + item.text,
+        el("button", { type: "button", onclick: function () {
+          fetch("/api/v1/questions/" + encodeURIComponent(item.id), { method: "DELETE" })
+            .then(function (response) { return response.json(); })
+            .then(function (body) { ui().replace(body); });
+        } }, ["×"])
+      ]));
+    });
+    var form = el("form", { class: "ask", onsubmit: function (event) {
+      event.preventDefault();
+      var input = event.target.querySelector("input");
+      ui().postJson("/api/v1/questions", { text: input.value });
+    } }, [
+      el("input", { type: "text", placeholder: lang() === "fr" ? "Quelle question l'ontologie doit-elle trancher ?" : "Which question should the ontology answer?" }),
+      el("button", { type: "submit" }, [lang() === "fr" ? "Ajouter" : "Add"])
+    ]);
+    root.append(form);
+    if ((standards.checks || []).length) {
+      root.append(el("h3", {}, [lang() === "fr" ? "Rapport de qualité" : "Quality report"]));
+      (standards.checks || []).forEach(function (item) {
+        root.append(el("p", { class: item.status === "failed" ? "bad" : "muted" }, [
+          item.name + " — " + item.detail
+        ]));
+      });
+    }
     root.append(el("h3", {}, [lang() === "fr" ? "Depuis le terminal" : "From the terminal"]));
     root.append(el("pre", {}, [
       "uv run ontology serve\nuv run ontology import a.pdf b.epub --fake\nuv run ontology ask \"qui dirige la bibliothèque\"\nuv run ontology mcp"

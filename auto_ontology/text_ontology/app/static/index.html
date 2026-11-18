@@ -16,7 +16,9 @@ SPDX-License-Identifier: Apache-2.0
 <header class="top">
   <div class="brand">
     <input id="project-name" class="project-name" type="text" aria-label="Nom du projet" placeholder="Projet" disabled>
-    <button type="button" id="new-project" data-i18n="newProject">Nouveau projet</button>
+    <button type="button" id="new-project" class="icon-btn" aria-label="Nouveau projet" title="Nouveau projet">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
     <select id="project-switch" class="project-switch" hidden aria-label="Projets"></select>
   </div>
   <nav class="views" aria-label="Vues">
@@ -33,15 +35,27 @@ SPDX-License-Identifier: Apache-2.0
   </nav>
   <input id="search" type="search" data-i18n-placeholder="search" placeholder="Rechercher…" autocomplete="off" aria-label="Recherche">
   <div class="top-actions">
-    <button type="button" id="add-btn" data-i18n="add">Ajouter</button>
-    <button type="button" id="undo-btn" data-i18n="undo" title="Ctrl+Z" disabled>Annuler</button>
-    <button type="button" id="redo-btn" data-i18n="redo" title="Ctrl+Maj+Z" disabled>Rétablir</button>
+    <button type="button" id="add-btn" class="icon-btn" aria-label="Ajouter" title="Ajouter">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg>
+    </button>
+    <button type="button" id="undo-btn" class="icon-btn" aria-label="Annuler" title="Ctrl+Z" disabled>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+    </button>
+    <button type="button" id="redo-btn" class="icon-btn" aria-label="Rétablir" title="Ctrl+Maj+Z" disabled>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+    </button>
     <details id="download" class="menu">
-      <summary data-i18n="download">Télécharger</summary>
+      <summary id="download-btn" class="icon-btn" aria-label="Télécharger" title="Télécharger">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      </summary>
       <div class="menu-list" id="download-list"></div>
     </details>
-    <button type="button" id="settings-btn" data-i18n="settings">Réglages</button>
-    <button type="button" id="theme-btn" data-i18n="theme">Sombre</button>
+    <button type="button" id="settings-btn" class="icon-btn" aria-label="Réglages" title="Réglages">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="var(--panel)"/><circle cx="16" cy="12" r="2" fill="var(--panel)"/><circle cx="10" cy="17" r="2" fill="var(--panel)"/></svg>
+    </button>
+    <button type="button" id="theme-btn" class="icon-btn" aria-label="Sombre" title="Sombre">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z"/></svg>
+    </button>
     <button type="button" id="lang-btn" aria-label="Language">EN</button>
   </div>
 </header>
@@ -81,6 +95,7 @@ SPDX-License-Identifier: Apache-2.0
           <option value="circle">Cercle</option>
         </select>
         <button type="button" id="fit-btn" data-i18n="fit">Recentrer</button>
+        <span id="filter-chip" class="filter-chip" hidden></span>
         <span id="legend" class="legend"></span>
         <canvas id="minimap" width="148" height="92" aria-hidden="true"></canvas>
       </div>
@@ -89,6 +104,7 @@ SPDX-License-Identifier: Apache-2.0
     <div id="tree-view" class="tree-view" hidden></div>
     <div id="panel-view" class="panel-view" hidden></div>
   </main>
+  <button type="button" id="splitter" aria-label="Redimensionner le panneau"></button>
   <aside id="side" class="side" aria-live="polite"></aside>
 </div>
 
@@ -148,6 +164,39 @@ SPDX-License-Identifier: Apache-2.0
   <p id="drop-name"></p>
 </div>
 
+<div id="preview" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+    <h2 id="preview-title">Aperçu</h2>
+    <p id="preview-summary"></p>
+    <div class="diff">
+      <div><h3>Avant</h3><ul id="preview-before"></ul></div>
+      <div><h3>Après</h3><ul id="preview-after"></ul></div>
+    </div>
+    <div class="paste-actions">
+      <button type="button" id="preview-cancel">Annuler</button>
+      <button type="button" id="preview-apply" class="primary">Appliquer</button>
+    </div>
+  </div>
+</div>
+<div id="palette" class="modal" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Commandes">
+    <input id="palette-q" type="search" placeholder="Commande…" autocomplete="off">
+    <ul id="palette-list"></ul>
+  </div>
+</div>
+<div id="shortcuts" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+    <h2 id="shortcuts-title">Raccourcis</h2>
+    <ul>
+      <li>Ctrl/Cmd+K — commandes</li>
+      <li>Ctrl/Cmd+Z — annuler · Maj pour rétablir</li>
+      <li>/ — rechercher</li>
+      <li>? — cette liste</li>
+      <li>Échap — fermer</li>
+    </ul>
+    <button type="button" id="shortcuts-close">Fermer</button>
+  </div>
+</div>
 <div id="tour" class="tour" hidden>
   <div class="tour-card" role="dialog" aria-labelledby="tour-title">
     <h2 id="tour-title"></h2>
