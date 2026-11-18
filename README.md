@@ -112,11 +112,25 @@ curl -s "http://127.0.0.1:4173/api/v1/export?format=turtle" -o ontologie.ttl
 Other commands, still one install:
 
 ```bash
-uv run ontology import contrat.pdf article.txt --fake
+uv run ontology open ~/Dossiers/Fournisseurs --playbook audit-contrats
+uv run ontology import contrat.pdf relance.eml ~/Vault export-notion.zip clients.xlsx
+uv run ontology brief --since 24h
+uv run ontology check
 uv run ontology ask "qui dirige la bibliothèque"
-uv run ontology mcp
-uv run ontology serve --watch ~/Documents/a-lire --fake
+uv run ontology ask "plafond des clients situés à Lyon" --data
+uv run ontology sql "SELECT * FROM onto_facts LIMIT 5"
+uv run ontology report meeting --out compte-rendu.md
+uv run ontology mcp --allow-writes
 ```
+
+`open` makes a project of a folder, watches it and opens the page. Emails
+bring their attachments, a folder is read like an Obsidian vault, a Notion
+export is unpacked, and spreadsheets become read-only tables. The same text
+is never extracted twice. `brief` says what came in and what to check.
+Tables and facts meet in one SQL query (`onto_facts`, joined with
+`okey()`), and `ask --data` has the model write that query. A playbook
+(contract audit, finance and KPIs, project knowledge, or your own YAML)
+guides extraction and adds checks.
 
 The Schema and Explorer tabs separate types from instances. Corrections are
 actions with a preview and a log. A branch is a JSON copy: merge it or discard
@@ -126,8 +140,10 @@ to FOAF or schema.org are never applied on their own. `ontology sdk --out client
 `/api/tester` tries a typed search. Off this machine, set `ONTOLOGY_API_TOKEN`;
 writes also need `ONTOLOGY_API_ALLOW_WRITE=1`.
 
-`ontology mcp` speaks MCP on standard input. It can read and preview an
-action. Applying a change from a remote client needs the write flag.
+`ontology mcp` speaks MCP on standard input: facts, tables, brief, playbook
+checks and reports. With `--allow-writes`, an agent can add a sourced fact or
+certify a rule, each after a preview and a single-use confirmation token,
+and each undoable in the studio.
 A textless PDF is flagged as a scan. If Tesseract is on the PATH the page says
 so; the binary is not launched. Neighbour search uses local character
 trigrams, and a candidate is never merged on its own. Writing the result back

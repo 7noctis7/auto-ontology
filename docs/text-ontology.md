@@ -27,7 +27,8 @@ available, and the page itself includes an example that does not call a
 model. The page also types each document, offers a guide, proposed
 dashboards, and a read API at `/docs`. Corrections are reused in the next
 prompt; they do not train a model. `ontology import`, `ontology ask` and
-`ontology mcp` script the same project. The CLI below remains the way to
+`ontology mcp` script the same project; [Daily use](#daily-use) covers
+`open`, `brief`, tables, playbooks and the MCP tools. The CLI below remains the way to
 script one extraction. The page also keeps a schema, saved sets, a lineage
 chain, project branches, and `ontology sdk` for a generated Python client.
 Export uses OWL 2 Turtle (classes apart from individuals) and JSON-LD with
@@ -233,6 +234,217 @@ and the facts, and a search for one says where to find it. The class matrix
 keeps the 25 most connected classes. While an extraction runs, every API
 route that writes answers 409 instead of being overwritten by the
 extraction's final save.
+
+## Daily use
+
+The studio keeps one folder per project under `~/AutoOntology`
+(`ONTOLOGY_HOME`). These commands work on the project the page has open.
+
+```bash
+uv run ontology open ~/Dossiers/Fournisseurs --playbook audit-contrats
+uv run ontology import ~/Vault ~/Downloads/export-notion.zip relance.eml
+uv run ontology import --paste          # the clipboard, as a document
+uv run ontology brief --since 24h       # what came in, what to check
+uv run ontology diff --since 7d         # facts added and removed
+uv run ontology check                   # the playbook's checks
+uv run ontology tables
+uv run ontology sql "SELECT * FROM onto_facts LIMIT 5"
+uv run ontology ask "budget des contrats qui expirent" --data
+uv run ontology report meeting --document compte-rendu --out cr.md
+uv run ontology report compare "ACME" "Orbital Lab"
+uv run ontology rules add "Un contrat de plus de 50 k€ demande deux signatures." --source "Comité du 18/11"
+uv run ontology mcp --allow-writes
+```
+
+### What can be brought in
+
+`ontology import`, the watched folder (`ontology open`, or `serve --watch`)
+and the page share one intake (`inbox.py`):
+
+| Input | Becomes |
+| --- | --- |
+| PDF, EPUB, DOCX, HTML, Markdown, text | a document, extracted by the model |
+| `.eml` | a document (subject, sender, recipients, date, the new text without quoted replies), and each supported attachment as its own document or table |
+| an Obsidian vault (a folder) | its notes, read recursively; hidden folders (`.obsidian`, `.trash`), `node_modules` and the studio's own home are skipped. Front matter, `[[links|aliases]]`, embeds and callout markers read as prose |
+| a Notion export (`.zip`) | its pages and databases; the 32-character page ids are dropped from names. The archive is checked for an abnormal expansion first |
+| CSV, TSV, Excel, Parquet, SQLite, DuckDB | read-only tables in the project's `data.duckdb`, profiled (types, empty values, samples); no model needed |
+
+The same text is not extracted twice, whatever its file name, its line
+breaks or the model: the second copy is reported as a duplicate. `--force`
+extracts it again (with another model, for instance) and replaces the
+first. An extraction that left chunks unanswered runs again without
+`--force`; the chunk cache makes that cost only the missing chunks.
+
+Every arrival is written to `activity.jsonl` in the project folder,
+duplicates and failures included (the last 2,000 lines are kept).
+
+### brief and diff
+
+`brief` lists the documents, tables, facts and certified rules added since a
+moment (`24h`, `7d`, `2w`, `today`, `hier`, `2026-11-01`), the files that
+were skipped as known, and what needs a look: unreadable files, files that
+arrived with no model configured, chunks the model did not answer, classes
+with several parents, entities linked to nothing, and the playbook's
+findings. `diff` compares the project with the snapshot taken just before
+that moment (the undo history keeps the last 30).
+
+### Documents and data in one query
+
+Next to the tables, every query sees four views built from the facts:
+
+| View | Columns |
+| --- | --- |
+| `onto_facts` | `subject`, `subject_key`, `subject_type`, `predicate`, `object`, `object_key`, `object_type`, `document`, `quote` |
+| `onto_attributes` | `entity`, `entity_key`, `key`, `value`, `document`, `quote` |
+| `onto_entities` | `name`, `key`, `class`, `facts` |
+| `onto_rules` | `text`, `source`, `created_at`, `tags` |
+
+`okey(text)` is the join key: case, accents, punctuation and a trailing
+legal form (SA, SAS, Inc, GmbH…) do not count, so "ACME S.A." in a
+spreadsheet meets "Acme" in a contract:
+
+```sql
+SELECT c.client, c.plafond, f.object AS ville, f.quote
+FROM clients c
+JOIN onto_facts f ON okey(c.client) = f.subject_key
+WHERE f.predicate = 'est_situe_a'
+```
+
+Every query is one `SELECT`, checked before it runs, on a DuckDB connection
+opened read-only with external access off: it cannot read a file, attach a
+database or change a setting. Rows are capped and a query is stopped after
+20 seconds.
+
+`ontology ask --data` (and `POST /api/v1/ask/data`) has the configured model
+write that query from the schema, runs it, sends the error back once if it
+fails, then phrases the answer from the rows only, with the passages behind
+them. The SQL is always shown.
+
+### Playbooks
+
+A playbook says what a project is for. Three come with the studio:
+`audit-contrats`, `suivi-financier` and `base-connaissances`. A YAML file in
+`~/AutoOntology/playbooks/` adds one, or replaces a bundled one with the same
+`id`. A project's playbook:
+
+- adds its `focus`, `classes` and `predicates` to every extraction prompt
+  (the project's own names still win);
+- adds `checks`, run without a model by `ontology check`, `brief`, the page
+  and MCP `check_playbook`;
+- lists the questions the project should answer.
+
+```yaml
+id: recrutement
+name: Recrutement
+description: Candidats, postes et entretiens.
+focus: |
+  Relève chaque candidat, le poste visé, les dates d'entretien et la décision.
+classes: [Candidat, Poste, Entretien]
+predicates: [postule_a, passe_entretien, est_retenu_pour]
+questions:
+  - Quels candidats attendent une réponse ?
+checks:
+  - id: sans-poste
+    title: Candidat sans poste
+    kind: missing_relation        # or missing_attribute
+    severity: haute               # haute, moyenne, basse
+    classes: [Candidat]           # subclasses count too
+    predicates: [postule_a]
+  - id: entretien-proche
+    title: Entretien dans les 7 jours
+    kind: date_within             # or date_past
+    days: 7
+    attributes: [date_entretien]
+  - id: salaire-eleve
+    title: Prétention au-dessus de 80 k€
+    kind: value_above
+    threshold: 80000
+    attributes: [pretention_salariale]
+  - id: sans-decision
+    title: Entretien passé sans décision
+    kind: sql                     # one read-only SELECT; each row is a finding
+    sql: SELECT entity FROM onto_attributes WHERE key = 'statut' AND value = 'en attente'
+```
+
+Dates are read as `2027-03-31`, `31/03/2027` or `31 mars 2027`; amounts as
+`50 000 €`, `1,2 M€` or `120k`. A finding names its source document.
+`ontology check` exits with 1 when a finding is of high priority, so it can
+run in a scheduled job.
+
+### Rules and reports
+
+A rule is stated, not extracted: "a contract over 50 k€ needs two
+signatures". `ontology rules add`, the page (Documents view) and MCP
+`certify_rule` record one with its source; `ontology rules retire <id>` keeps
+it for the record but stops listing it. Rules appear in `brief` and in the
+`onto_rules` view.
+
+`ontology report meeting` sorts one document's facts into participants,
+decisions, actions and figures, each with its passage: the skeleton of a
+meeting summary, built without a model. `ontology report compare A B` puts
+what the project knows about a few entities side by side.
+
+### MCP server
+
+`ontology mcp` serves the current project over standard input:
+
+```json
+{
+  "mcpServers": {
+    "ontology": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/auto-ontology", "run", "ontology", "mcp"]
+    }
+  }
+}
+```
+
+| Tool | Does |
+| --- | --- |
+| `brief` | what came in since a moment, and what to check |
+| `search`, `get_concept`, `facts`, `lineage`, `list_concepts` | the facts and where they come from |
+| `ask_question` | an answer from the facts, with the passages |
+| `list_tables`, `describe_table`, `run_sql` | tables and `onto_*` views, one read-only `SELECT` |
+| `export_report` | a meeting summary or a comparison table, in Markdown |
+| `check_playbook` | the playbook's findings |
+| `preview_action` | what a rename or a merge would change |
+| `remember_fact`, `certify_rule` | only with `--allow-writes` (below) |
+
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`), the
+server negotiates the protocol version (2025-06-18 down to 2024-11-05) and
+returns structured content when the client supports it. The first version's
+names (`neighbours`, `ask`) still answer.
+
+With `--allow-writes`, an agent can add a fact it was told (with its source)
+or certify a rule. Each write takes two calls. The first returns a preview
+and a `confirm_token`, and writes nothing. The second, with the same
+arguments and the token, writes. The token is an HMAC bound to the
+arguments and to the project's state; it expires after five minutes and
+works once, so an agent writes exactly what it showed, on the state it
+previewed. A write is one undo step in the studio and a line in the action
+log under `mcp`. While an extraction runs on the project (in this process
+or another), writes wait. This adds to the client's own approval prompt; it
+does not replace it.
+
+The product's MCP server (`mcp/`, over HTTP, see [mcp.md](mcp.md)) answers
+the same kinds of question on the databases' semantic layer. Its names stay
+as they are, since agents and skills already rely on them:
+
+| Question | Studio (`ontology mcp`) | Product (`auto-ontology-mcp`) |
+| --- | --- | --- |
+| Find a concept | `search` | `search_terms` |
+| One concept | `get_concept` | `get_term` |
+| One table | `describe_table` | `describe_table` |
+| A question | `ask_question` | `ask_question` |
+| Can it answer? | `check_playbook`, `brief` | `check_answerable`, `check_readiness` |
+
+### What this does not do yet
+
+Facts and rules stay in the local project: nothing is published to the
+Postgres catalog, there is no shared workspace and no question across
+projects. Emails are read from `.eml` files, not from a mailbox (no IMAP),
+and Notion from its export, not its API. The studio's messages are in
+French; the page alone switches to English.
 
 ## API
 

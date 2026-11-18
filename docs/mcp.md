@@ -136,6 +136,16 @@ underlying databases.
 | `get_sql_attribute` | One SQL attribute: its expression and purpose. |
 | `describe_table` | The glossary terms a table carries, and stored queries that reference it. |
 
+Every tool carries MCP annotations, so a client need not assume the
+worst-case defaults: all are `readOnlyHint` and none is `destructiveHint`,
+except `ask_question`, which is not read-only because each call records a
+conversation turn (it never changes the connected data).
+
+The local text studio has its own MCP server on standard input,
+`ontology mcp`, over documents and spreadsheets instead of databases. Its
+tools and how they line up with these are in
+[text-ontology.md](text-ontology.md#mcp-server).
+
 There is deliberately no tool for browsing databases, schemas, or raw columns.
 Consumers are meant to reach the data through the semantic layer, and a catalog
 browser invites an agent to reason about raw tables instead. `describe_table`
