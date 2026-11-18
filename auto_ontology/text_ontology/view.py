@@ -476,6 +476,7 @@ def build_view(
         "object_sets": [item.model_dump() for item in project.object_sets],
         "action_log": [item.model_dump() for item in project.action_log[-30:]],
         "notes": [item.model_dump() for item in project.notes],
+        "datasets": [item.model_dump() for item in project.datasets],
         "standards": {
             "checks": [item.model_dump() for item in shacl_checks(project)],
             "alignments": alignment_suggestions(project),

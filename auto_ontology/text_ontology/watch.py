@@ -24,6 +24,12 @@ from auto_ontology.text_ontology.llm_settings import (
     resolve_llm_config,
 )
 from auto_ontology.text_ontology.pipeline import IngestError, ingest_document
+from auto_ontology.text_ontology.tables import (
+    TABULAR_SUFFIXES,
+    TableError,
+    import_tabular,
+    is_tabular,
+)
 from auto_ontology.text_ontology.sample import FakeLLM
 
 _SUFFIXES = {
@@ -36,8 +42,9 @@ _SUFFIXES = {
     ".html",
     ".htm",
     ".rst",
-    ".csv",
     ".json",
+    ".eml",
+    *TABULAR_SUFFIXES,
 }
 
 
@@ -110,6 +117,15 @@ def _ingest_path(studio: object, path: Path) -> bool:
 
 def _ingest_claimed(studio: object, path: Path) -> None:
     store = studio.store  # type: ignore[attr-defined]
+    if is_tabular(path.name):
+        project = store.current() or store.create("Import")
+        try:
+            import_tabular(store, project, path.name, path.read_bytes())
+        except (OSError, TableError):
+            logger.warning(
+                "Watched folder: %s could not be loaded as a table", path.name
+            )
+        return
     try:
         loaded = load_bytes(path.name, path.read_bytes())
     except (OSError, DocumentReadError):

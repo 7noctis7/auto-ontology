@@ -11,6 +11,7 @@ the graph library and the exports are served from this package.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 import threading
 import uuid
 from pathlib import Path
@@ -50,6 +51,7 @@ from auto_ontology.text_ontology.pipeline import (
 from auto_ontology.text_ontology.sample import FakeLLM
 from auto_ontology.text_ontology.store import ProjectStore, default_home
 from auto_ontology.text_ontology.studio_export import render_export
+from auto_ontology.text_ontology.tables import TableError, import_tabular, is_tabular
 from auto_ontology.text_ontology.studio_models import Edit, Project, StudioSettings
 from auto_ontology.text_ontology.view import build_view
 
@@ -262,6 +264,23 @@ def create_app(
     @app.post("/api/ingest")
     async def post_ingest(request: Request) -> dict[str, Any]:
         loaded, force, sync = await _read_ingest(request)
+        if isinstance(loaded, TabularUpload):
+            # A spreadsheet becomes a table: no model, no chunks, no wait.
+            project = _ensure_project(studio, Path(loaded.filename).stem or "Données")
+            _begin(studio)
+            try:
+                records = import_tabular(
+                    studio.store, project, loaded.filename, loaded.data
+                )
+            except TableError as exc:
+                raise IngestError("unreadable", str(exc)) from exc
+            finally:
+                _end(studio)
+            view = _view(studio)
+            view["notice"] = "Tables chargées : " + ", ".join(
+                f"{r.table} ({r.rows} lignes)" for r in records
+            )
+            return view
         config, llm, label = _prepare_llm(studio)
         project = _ensure_project(studio, Path(loaded.filename).stem or "Brouillon")
         if sync:
@@ -399,6 +418,8 @@ async def _read_ingest(request: Request) -> tuple[Any, bool, bool]:
         if not text.strip():
             raise IngestError("empty_document", "Collez un texte à extraire.")
         _check_size(len(text.encode("utf-8")))
+        if is_tabular(filename):
+            return TabularUpload(filename, text.encode("utf-8")), False, True
         return (
             load_text(filename, text),
             bool(body.get("force")),
@@ -419,10 +440,20 @@ async def _read_ingest(request: Request) -> tuple[Any, bool, bool]:
         data = await upload.read()
         _check_size(len(data))
         name = filename or getattr(upload, "filename", "") or "document"
+        if is_tabular(str(name)):
+            return TabularUpload(str(name), data), force, sync
         return load_bytes(str(name), data), force, sync
     if text.strip():
         return load_text(filename or "colle.txt", text), force, sync
     raise IngestError("empty_document", "Déposez un fichier ou collez du texte.")
+
+
+@dataclass(frozen=True)
+class TabularUpload:
+    """An uploaded spreadsheet, loaded as a table rather than read as text."""
+
+    filename: str
+    data: bytes
 
 
 def _check_size(size: int) -> None:

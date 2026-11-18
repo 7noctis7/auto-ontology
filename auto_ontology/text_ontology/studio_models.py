@@ -230,6 +230,28 @@ class Memory(BaseModel):
     scores: list[ScorePoint] = Field(default_factory=list)
 
 
+class ColumnProfile(BaseModel):
+    """One column of a loaded table: what an agent needs to write a query."""
+
+    name: str
+    type: str
+    nulls: int = 0
+    distinct: int = 0
+    samples: list[str] = Field(default_factory=list)
+
+
+class DatasetRecord(BaseModel):
+    """A table loaded from a tabular file into the project's DuckDB file."""
+
+    table: str
+    source: str
+    sheet: str = ""
+    sha256: str
+    rows: int
+    columns: list[ColumnProfile] = Field(default_factory=list)
+    added_at: str = ""
+
+
 class Project(BaseModel):
     """One domain, stored as ``project.json``."""
 
@@ -249,6 +271,7 @@ class Project(BaseModel):
     action_log: list[ActionEntry] = Field(default_factory=list)
     object_sets: list[ObjectSetDef] = Field(default_factory=list)
     notes: list[NoteLink] = Field(default_factory=list)
+    datasets: list[DatasetRecord] = Field(default_factory=list)
     questions: list[CompetencyQuestion] = Field(default_factory=list)
     mappings: list[VocabularyMapping] = Field(default_factory=list)
     base_iri: str = ""

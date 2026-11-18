@@ -107,6 +107,26 @@
         ]));
       });
     }
+    var tables = state.datasets || [];
+    if (tables.length) {
+      root.append(el("h3", {}, [lang() === "fr" ? "Tables" : "Tables"]));
+      root.append(el("p", { class: "muted" }, [lang() === "fr"
+        ? "Interrogeables en lecture seule : ontology sql \"SELECT …\" ou /api/v1/sql."
+        : "Queryable read-only: ontology sql \"SELECT …\" or /api/v1/sql."]));
+      tables.forEach(function (table) {
+        root.append(el("article", { class: "doc-card" }, [
+          el("header", {}, [
+            el("strong", {}, [table.table]),
+            el("span", { class: "muted" }, [" " + table.rows + (lang() === "fr" ? " lignes" : " rows")])
+          ]),
+          el("p", { class: "muted" }, [table.source + (table.sheet ? " · " + table.sheet : "")]),
+          el("p", {}, [(table.columns || []).map(function (column) {
+            return column.name + " (" + column.type + ")" +
+              ((column.samples || []).length ? " : " + column.samples.join(", ") : "");
+          }).join(" · ")])
+        ]));
+      });
+    }
     var picks = [];
     (state.documents || []).forEach(function (doc) {
       var select = el("select", { "aria-label": "Type" }, Object.keys(GENRE.fr).map(function (id) {

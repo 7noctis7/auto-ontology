@@ -137,6 +137,21 @@ def main(argv: list[str] | None = None) -> int:
     open_parser.add_argument(
         "--fake", action="store_true", help="Sans modèle (démonstration)."
     )
+    tables_parser = commands.add_parser(
+        "tables", help="Liste les tables du projet courant (colonnes, types, exemples)."
+    )
+    tables_parser.add_argument("--home", default=None)
+    sql_parser = commands.add_parser(
+        "sql", help="Une requête SELECT en lecture seule sur les tables du projet."
+    )
+    sql_parser.add_argument(
+        "query", help='Par exemple : "SELECT * FROM ventes LIMIT 5"'
+    )
+    sql_parser.add_argument("--limit", type=int, default=200)
+    sql_parser.add_argument(
+        "--format", choices=["table", "json", "csv"], default="table"
+    )
+    sql_parser.add_argument("--home", default=None)
     sdk_parser = commands.add_parser(
         "sdk", help="Écrit un client Python à partir du schéma du projet courant."
     )
@@ -166,6 +181,15 @@ def main(argv: list[str] | None = None) -> int:
         serve_mcp(Path(args.home) if args.home else None)
     elif args.command == "sdk":
         write_sdk(Path(args.out), home=Path(args.home) if args.home else None)
+    elif args.command == "tables":
+        return show_tables(home=Path(args.home) if args.home else None)
+    elif args.command == "sql":
+        return query_tables(
+            args.query,
+            limit=args.limit,
+            output=args.format,
+            home=Path(args.home) if args.home else None,
+        )
     elif args.command == "open":
         return open_folder(
             Path(args.folder),
@@ -174,6 +198,62 @@ def main(argv: list[str] | None = None) -> int:
             home=Path(args.home) if args.home else None,
             fake=args.fake,
         )
+    return 0
+
+
+def _current_project(home: Path | None) -> tuple[object, object] | None:
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(home or default_home())
+    project = store.current()
+    if project is None:
+        print(
+            "Aucun projet. Lancez d'abord `ontology open <dossier>` ou `ontology import`.",
+            file=sys.stderr,
+        )
+        return None
+    return store, project
+
+
+def show_tables(*, home: Path | None) -> int:
+    """``ontology tables``: what the current project's tables hold."""
+    from auto_ontology.text_ontology.tables import describe_tables
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    _store, project = found
+    print(
+        describe_tables(project)
+        or "Aucune table : importez un CSV, un Excel ou une base SQLite."
+    )  # type: ignore[arg-type]
+    return 0
+
+
+def query_tables(query: str, *, limit: int, output: str, home: Path | None) -> int:
+    """``ontology sql``: one read-only SELECT, printed as a table, JSON or CSV."""
+    import csv
+    import json
+
+    from auto_ontology.text_ontology.tables import TableError, run_sql
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    store, project = found
+    try:
+        result = run_sql(store.project_dir(project.id), query, limit=limit)  # type: ignore[attr-defined]
+    except TableError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if output == "json":
+        print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
+    elif output == "csv":
+        writer = csv.writer(sys.stdout)
+        writer.writerow(result.columns)
+        writer.writerows(result.rows)
+    else:
+        print(result.as_table())
     return 0
 
 
@@ -222,20 +302,23 @@ def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
     from auto_ontology.text_ontology.sample import FakeLLM
     from auto_ontology.text_ontology.store import ProjectStore
 
+    from auto_ontology.text_ontology.tables import import_tabular, is_tabular
+
     store = ProjectStore(home or default_home())
-    settings = store.settings()
-    if settings.last_project_id:
-        try:
-            project = store.load(settings.last_project_id)
-        except (FileNotFoundError, ValueError):
-            project = store.create("Import")
-    else:
-        projects = store.list_projects()
-        project = projects[0] if projects else store.create("Import")
+    project = store.current() or store.create("Import")
+    documents = [path for path in paths if not is_tabular(path.name)]
+    for path in paths:
+        if is_tabular(path.name):
+            # A spreadsheet becomes a table: no model needed.
+            for record in import_tabular(store, project, path.name, path.read_bytes()):
+                print(f"{path.name} → table {record.table} ({record.rows} lignes)")
+    if not documents:
+        return
     config = resolve_llm_config(store)
     llm = FakeLLM() if fake else build_llm(config)
     label = "démonstration" if fake else model_label(llm, config)
-    for path in paths:
+    for path in documents:
+        project = store.load(project.id)
         loaded = load_bytes(path.name, path.read_bytes())
         ingest_document(
             store,

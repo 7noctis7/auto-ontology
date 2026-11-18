@@ -154,6 +154,11 @@ def access_allowed(client_host: str, authorization: str, token: str) -> bool:
     return authorization == f"Bearer {token}"
 
 
+class SqlBody(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=20_000)
+    limit: int = Field(default=200, ge=1, le=5000)
+
+
 def install_api(app: FastAPI) -> None:
     """Routes under ``/api/v1`` plus the token check and the Swagger description."""
     app.title = "Studio d'ontologie"
@@ -451,6 +456,30 @@ def install_api(app: FastAPI) -> None:
         if q:
             return {"results": semantic_search(project, q), "auto_merge": False}
         return {"candidates": merge_candidates(project), "auto_merge": False}
+
+    @app.get("/api/v1/tables")
+    def get_tables(request: Request) -> dict[str, Any]:
+        """Tables loaded from spreadsheets: columns, types, row counts, samples."""
+        project = _project(request)
+        return {"tables": [item.model_dump() for item in project.datasets]}
+
+    @app.post("/api/v1/sql")
+    def post_sql(body: SqlBody, request: Request) -> dict[str, Any]:
+        """One read-only SELECT on the project's tables, capped and timed.
+
+        The statement is checked, and the connection is read-only with no
+        access to files or the network, whoever wrote the query.
+        """
+        from auto_ontology.text_ontology.tables import TableError, run_sql
+
+        studio, project = _studio(request)
+        try:
+            result = run_sql(
+                studio.store.project_dir(project.id), body.sql, limit=body.limit
+            )
+        except TableError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return result.as_dict()
 
     @app.get("/api/v1/branches")
     def get_branches(request: Request) -> dict[str, Any]:

@@ -67,13 +67,15 @@ _COMMANDS = ("extract", "merge", "export", "clean", "eval")
 # Served by the studio's own parser (auto_ontology.text_ontology.studio): both
 # entry points, `ontology` and `python -m auto_ontology.text_ontology`, accept
 # every command and hand the other group over.
-STUDIO_COMMANDS = ("open", "serve", "import", "ask", "mcp", "sdk")
+STUDIO_COMMANDS = ("open", "serve", "import", "tables", "sql", "ask", "mcp", "sdk")
 
 _EPILOG = """\
 Studio commands (same entry point):
   open     one folder, one command: project, import, watching and studio
   serve    open the local studio in the browser (no database, no login)
-  import   extract files into the current studio project
+  import   add files to the current project (spreadsheets become tables)
+  tables   list the current project's tables: columns, types, samples
+  sql      one read-only SELECT on those tables
   ask      answer from the current project's facts, with sources
   mcp      read-only MCP server on standard input
   sdk      write a Python client for the current project's schema
