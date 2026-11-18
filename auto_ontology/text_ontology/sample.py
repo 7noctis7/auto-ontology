@@ -6,11 +6,14 @@
 
 The text and the triples describe the same municipal library. Loading the
 sample does not call a model. The fake extractor used by ``--fake`` and by
-the tests returns this ontology when the text mentions the library, so a
-PDF and an EPUB of the same passage produce the same graph.
+the tests returns this ontology when the text mentions the library. Any other
+text is read with a deterministic heuristic, so two documents do not produce
+the same graph.
 """
 
 from __future__ import annotations
+
+import re
 
 from auto_ontology.text_ontology.models import (
     OntologyAttribute,
@@ -125,8 +128,8 @@ class FakeLLM:
     """A stand-in model for tests and ``ontology serve --fake``.
 
     It never touches the network. A text that mentions the sample library
-    yields the sample ontology; any other non-empty text yields one class
-    and one entity taken from its first line, so the graph is never blank.
+    yields the sample ontology. Any other text yields a small ontology built
+    from names, titles and a few French patterns in that text alone.
     """
 
     model_name = "demo"
@@ -138,7 +141,8 @@ class FakeLLM:
         text = _message_text(messages)
         if "Camille Martin" in text or "bibliothèque municipale" in text.casefold():
             return sample_ontology()
-        return _minimal(text)
+        built = _heuristic(text)
+        return built if built.triplets or built.classes else _minimal(text)
 
 
 def _message_text(messages: list[object]) -> str:
@@ -148,6 +152,105 @@ def _message_text(messages: list[object]) -> str:
         if isinstance(content, str):
             parts.append(content)
     return "\n".join(parts)
+
+
+_PERSON = re.compile(
+    r"\b([A-ZÉÈÀÂÊÎÔÛÇ][a-zà-ÿ'’-]{2,}(?:\s+[A-ZÉÈÀÂÊÎÔÛÇ][a-zà-ÿ'’-]{2,})+)\b"
+)
+_QUOTE = re.compile(r"«\s*([^»]{3,80})\s*»")
+
+
+def _source_slice(text: str) -> str:
+    start = text.find("<texte_source>")
+    end = text.find("</texte_source>")
+    if start >= 0 and end > start:
+        return text[start + len("<texte_source>") : end]
+    return text
+
+
+def _heuristic(text: str) -> TextOntology:
+    """Names and a few patterns. The same text always yields the same triples."""
+    source = _source_slice(text).strip()
+    if not source:
+        return TextOntology()
+    folded = source.casefold()
+    people = list(dict.fromkeys(_PERSON.findall(source)))[:4]
+    quoted = list(dict.fromkeys(_QUOTE.findall(source)))[:2]
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    title = ""
+    for line in lines:
+        if re.match(r"(?i)^(de|from|objet|subject)\s*:", line):
+            if line.casefold().startswith(("objet", "subject")):
+                title = line.split(":", 1)[-1].strip()
+            continue
+        if 8 <= len(line) <= 90:
+            title = title or line
+            break
+    classes = [
+        OntologyClass(name="Document", description="Un écrit cité dans le texte."),
+        OntologyClass(
+            name="Personne", description="Une personne nommée dans le texte."
+        ),
+    ]
+    triplets: list[OntologyTriplet] = []
+    attributes: list[OntologyAttribute] = []
+    if "contrat" in folded or "clause" in folded:
+        classes.append(OntologyClass(name="Clause", description="Une stipulation."))
+    if "abstract" in folded or "hypothèse" in folded or "hypothese" in folded:
+        classes.append(
+            OntologyClass(name="Hypothese", description="Une proposition à examiner.")
+        )
+    document = quoted[0] if quoted else (title[:72] if title else "")
+    if document and people:
+        triplets.append(
+            OntologyTriplet(
+                subject=document,
+                subject_type="Document",
+                predicate="a_pour_auteur",
+                object=people[0],
+                object_type="Personne",
+            )
+        )
+    elif document:
+        kind = (
+            "Hypothese"
+            if any(item.name == "Hypothese" for item in classes)
+            else "Document"
+        )
+        triplets.append(
+            OntologyTriplet(
+                subject=document,
+                subject_type=kind,
+                predicate="est_mentionne_dans",
+                object=lines[0][:48],
+                object_type="Document",
+            )
+        )
+    elif people:
+        triplets.append(
+            OntologyTriplet(
+                subject=people[0],
+                subject_type="Personne",
+                predicate="est_cite_dans",
+                object=(title or "Texte")[:48],
+                object_type="Document",
+            )
+        )
+    for person in people[1:3]:
+        triplets.append(
+            OntologyTriplet(
+                subject=person,
+                subject_type="Personne",
+                predicate="est_cite_avec",
+                object=people[0],
+                object_type="Personne",
+            )
+        )
+    if "clause" in folded and document:
+        attributes.append(
+            OntologyAttribute(entity=document, key="nature", value="clause")
+        )
+    return TextOntology(classes=classes, triplets=triplets, attributes=attributes)
 
 
 def _minimal(text: str) -> TextOntology:

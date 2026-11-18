@@ -19,11 +19,15 @@ from pathlib import Path
 
 from auto_ontology.text_ontology.analysis import dashboard_html
 from auto_ontology.text_ontology.export import (
+    DEFAULT_BASE_IRI,
     _VIS_NETWORK_URL,
     ExportFormat,
+    _turtle_string,
     export_ontology,
     to_html,
+    to_turtle,
 )
+from auto_ontology.text_ontology.standards import local_name, shacl_turtle
 from auto_ontology.text_ontology.models import TextOntology
 from auto_ontology.text_ontology.learning import training_rows
 from auto_ontology.text_ontology.studio_models import Project
@@ -69,7 +73,9 @@ def render_export(project: Project, export_format: str) -> tuple[str, str, str]:
     if export_format == "csv":
         return to_csv(project), filename, media
     if export_format == "jsonld":
-        return to_jsonld(ontology), filename, media
+        return to_jsonld(project), filename, media
+    if export_format == "turtle":
+        return _turtle(project), filename, media
     if export_format == "dashboard":
         return _dashboard(project), filename, media
     if export_format == "jsonl":
@@ -147,43 +153,167 @@ def to_csv(project: Project) -> str:
     return buffer.getvalue()
 
 
-def to_jsonld(ontology: TextOntology) -> str:
-    """A compact JSON-LD graph: classes, individuals and relations."""
+def _turtle(project: Project) -> str:
+    aliases: dict[str, list[str]] = {}
+    for alias in project.memory.aliases:
+        aliases.setdefault(alias.target, []).append(alias.source)
+    base = project.base_iri.strip() or DEFAULT_BASE_IRI
+    body = to_turtle(
+        project.ontology,
+        base_iri=base,
+        title=project.name,
+        created=project.created_at,
+        creator="local",
+        aliases=aliases,
+    )
+    extra: list[str] = []
+    for mapping in project.mappings:
+        if not mapping.accepted:
+            continue
+        name = local_name(mapping.source, "class")
+        predicate = mapping.predicate
+        if predicate.startswith("owl:"):
+            predicate = predicate
+        extra.append(f":{name} {predicate} <{mapping.iri}> .")
+    parts = [body, shacl_turtle(project, base)]
+    if extra:
+        parts.append("# Alignements retenus\n" + "\n".join(extra) + "\n")
+    provenance = _provenance(project)
+    if provenance:
+        parts.append(provenance)
+    return "\n".join(parts)
+
+
+def _prov_token(value: str) -> str:
+    cleaned = "".join(ch for ch in value if ch.isalnum())
+    return cleaned[:32] or "x"
+
+
+def _provenance(project: Project) -> str:
+    """PROV-O for each document, its extraction run, and the individuals it produced."""
+    if not project.documents:
+        return ""
+    lines = ["# Provenance"]
+    known = {document.id for document in project.documents}
+    for document in project.documents:
+        token = _prov_token(document.id)
+        lines.append(f":doc{token} a prov:Entity ;")
+        lines.append(f"    rdfs:label {_turtle_string(document.filename)} .")
+        lines.append(f":run{token} a prov:Activity ;")
+        lines.append('    rdfs:label "extraction" ;')
+        lines.append(
+            f"    dcterms:hasVersion {_turtle_string(document.prompt_version or '1')} ;"
+        )
+        lines.append(f"    prov:used :doc{token} .")
+        if document.model:
+            lines.append(f":agent{token} a prov:SoftwareAgent ;")
+            lines.append(f"    rdfs:label {_turtle_string(document.model)} .")
+            lines.append(f":run{token} prov:wasAssociatedWith :agent{token} .")
+    seen: set[tuple[str, str]] = set()
+    for fact in project.triplets:
+        subject = local_name(fact.subject, "individual")
+        for source in fact.sources:
+            if source.document_id not in known:
+                continue
+            token = _prov_token(source.document_id)
+            passage = ""
+            if source.quote:
+                passage = f"passage{token}c{source.chunk_index}"
+                key = ("passage", passage)
+                if key not in seen:
+                    seen.add(key)
+                    lines.append(f":{passage} a prov:Entity ;")
+                    lines.append(
+                        f"    rdfs:label {_turtle_string(source.quote[:240])} ;"
+                    )
+                    lines.append(f"    prov:wasDerivedFrom :doc{token} .")
+            for predicate, target in (
+                ("prov:wasDerivedFrom", f":doc{token}"),
+                ("prov:wasGeneratedBy", f":run{token}"),
+            ):
+                edge = (f"{subject} {predicate}", target)
+                if edge not in seen:
+                    seen.add(edge)
+                    lines.append(f":{subject} {predicate} {target} .")
+            if passage:
+                edge = (f"{subject} prov:wasDerivedFrom", f":{passage}")
+                if edge not in seen:
+                    seen.add(edge)
+                    lines.append(f":{subject} prov:wasDerivedFrom :{passage} .")
+    return "\n".join(lines) + "\n"
+
+
+def to_jsonld(project: Project) -> str:
+    """JSON-LD with a context, CamelCase ids, and separate class IRIs."""
+    ontology = project.ontology
+    base = project.base_iri.strip() or DEFAULT_BASE_IRI
     graph: list[dict[str, object]] = []
     class_names = {cls.name for cls in ontology.classes}
     for cls in ontology.classes:
         node: dict[str, object] = {
-            "@id": cls.name,
+            "@id": local_name(cls.name, "class"),
             "@type": "owl:Class",
-            "rdfs:label": cls.name,
+            "label": cls.name,
         }
         if cls.parent:
-            node["rdfs:subClassOf"] = {"@id": cls.parent}
+            node["subClassOf"] = {"@id": local_name(cls.parent, "class")}
         if cls.description:
-            node["rdfs:comment"] = cls.description
+            node["definition"] = cls.description
         graph.append(node)
+    seen: set[str] = set()
     for triplet in ontology.triplets:
         if triplet.predicate == "est_un" and triplet.object in class_names:
+            if triplet.subject in class_names:
+                continue
+            node_id = local_name(triplet.subject, "individual")
+            graph.append(
+                {
+                    "@id": node_id,
+                    "@type": [
+                        "owl:NamedIndividual",
+                        local_name(triplet.object, "class"),
+                    ],
+                    "label": triplet.subject,
+                }
+            )
             continue
+        if triplet.subject in class_names or triplet.object in class_names:
+            continue
+        node_id = local_name(triplet.subject, "individual")
+        if node_id in seen:
+            continue
+        seen.add(node_id)
         graph.append(
             {
-                "@id": triplet.subject,
-                "@type": triplet.subject_type,
-                triplet.predicate: {"@id": triplet.object},
+                "@id": node_id,
+                "@type": [
+                    "owl:NamedIndividual",
+                    local_name(triplet.subject_type, "class"),
+                ],
+                "label": triplet.subject,
+                local_name(triplet.predicate, "property"): {
+                    "@id": local_name(triplet.object, "individual")
+                },
             }
         )
     for attribute in ontology.attributes:
+        if attribute.entity in class_names:
+            continue
         graph.append(
             {
-                "@id": attribute.entity,
-                attribute.key: attribute.value,
+                "@id": local_name(attribute.entity, "individual"),
+                local_name(attribute.key, "property"): attribute.value,
             }
         )
     document = {
         "@context": {
+            "@vocab": base,
             "owl": "http://www.w3.org/2002/07/owl#",
             "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-            "@vocab": "http://example.org/auto-ontology#",
+            "skos": "http://www.w3.org/2004/02/skos/core#",
+            "label": {"@id": "rdfs:label", "@language": "fr"},
+            "definition": "skos:definition",
+            "subClassOf": {"@id": "rdfs:subClassOf", "@type": "@id"},
         },
         "@graph": graph,
     }

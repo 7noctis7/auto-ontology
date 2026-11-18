@@ -99,10 +99,45 @@ _FR = frozenset(
 )
 _EN = frozenset("the and of to in for with that this from are was were".split())
 _AUTHOR = re.compile(r"(?im)^(?:auteur|author|par|by|de|from)\s*[:\-]\s*(.{3,80})$")
-_DATE = re.compile(
-    r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}|(?:19|20)\d{2})\b"
+_SUBJECT = re.compile(r"(?im)^(?:objet|subject)\s*:\s*(.{2,110})\s*$")
+_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_SLASH = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b")
+_NAMED = re.compile(
+    r"\b(\d{1,2})\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|"
+    r"septembre|octobre|novembre|décembre|decembre|january|february|march|april|"
+    r"may|june|july|august|september|october|november|december)\s+(\d{4})\b",
+    re.IGNORECASE,
 )
 _YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
+_MONTHS = {
+    "janvier": 1,
+    "january": 1,
+    "février": 2,
+    "fevrier": 2,
+    "february": 2,
+    "mars": 3,
+    "march": 3,
+    "avril": 4,
+    "april": 4,
+    "mai": 5,
+    "may": 5,
+    "juin": 6,
+    "june": 6,
+    "juillet": 7,
+    "july": 7,
+    "août": 8,
+    "aout": 8,
+    "august": 8,
+    "septembre": 9,
+    "september": 9,
+    "octobre": 10,
+    "october": 10,
+    "novembre": 11,
+    "november": 11,
+    "décembre": 12,
+    "decembre": 12,
+    "december": 12,
+}
 
 
 @dataclass(frozen=True)
@@ -163,15 +198,29 @@ def _domain(folded: str) -> tuple[str, float]:
 
 
 def _title(text: str, filename: str) -> str:
+    subject = _SUBJECT.search(text[:2500])
+    if subject:
+        return subject.group(1).strip()[:110]
     for line in text.splitlines():
         cleaned = line.strip().strip("#").strip()
         if not cleaned:
+            continue
+        if re.match(r"(?i)^(de|from)\s*:", cleaned):
             continue
         if 8 <= len(cleaned) <= 110 and cleaned.count(" ") <= 16:
             return cleaned
         break
     stem = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
-    return stem[:110]
+    return " ".join(stem.split())[:110]
+
+
+def project_name_from(title: str, filename: str) -> str:
+    """A short editable name: the subject or title, not the raw file name."""
+    cleaned = title.strip()
+    if cleaned and not re.match(r"(?i)^(de|from)\s*:", cleaned):
+        return cleaned[:80]
+    stem = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
+    return " ".join(stem.split())[:80] or "Projet"
 
 
 def _author(text: str) -> str:
@@ -183,9 +232,28 @@ def _author(text: str) -> str:
 
 
 def _date(text: str) -> str:
-    head = text[:1500]
-    match = _DATE.search(head) or _YEAR.search(head)
-    return match.group(1) if match else ""
+    """A full date wins over a bare year. French dates are day, then month."""
+    head = text[:8000]
+    named = _NAMED.search(head)
+    if named:
+        month = _MONTHS[named.group(2).casefold()]
+        return f"{int(named.group(1)):02d}/{month:02d}/{int(named.group(3)):04d}"
+    iso = _ISO.search(head)
+    if iso:
+        return f"{iso.group(1)}-{iso.group(2)}-{iso.group(3)}"
+    slash = _SLASH.search(head)
+    if slash:
+        day, month, year = (
+            int(slash.group(1)),
+            int(slash.group(2)),
+            int(slash.group(3)),
+        )
+        if month > 12 and day <= 12:
+            day, month = month, day
+        if 1 <= day <= 31 and 1 <= month <= 12:
+            return f"{day:02d}/{month:02d}/{year:04d}"
+    year = _YEAR.search(head)
+    return year.group(1) if year else ""
 
 
 def _language(text: str) -> str:

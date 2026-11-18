@@ -41,7 +41,12 @@ def cosine(left: list[float], right: list[float]) -> float:
 
 
 def merge_candidates(project: Project, limit: int = 8) -> list[dict[str, object]]:
-    """Pairs that look alike and share a type. Never an applied merge."""
+    """Pairs of individuals that look alike and share a type.
+
+    A class is never proposed as the merge of an individual, and two
+    different types are not paired. Nothing is merged by itself.
+    """
+    classes = {item.name for item in project.ontology.classes}
     entities: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for triplet in project.ontology.triplets:
@@ -49,7 +54,7 @@ def merge_candidates(project: Project, limit: int = 8) -> list[dict[str, object]
             (triplet.subject, triplet.subject_type),
             (triplet.object, triplet.object_type),
         ):
-            if name in seen:
+            if name in seen or name in classes:
                 continue
             seen.add(name)
             entities.append((name, type_name, _blob(project, name)))
@@ -57,7 +62,11 @@ def merge_candidates(project: Project, limit: int = 8) -> list[dict[str, object]
     for index, (left, left_type, left_text) in enumerate(entities):
         left_vector = vector(left_text)
         for right, right_type, right_text in entities[index + 1 :]:
-            if left_type and right_type and left_type != right_type:
+            if left in classes or right in classes:
+                continue
+            if left == right_type or right == left_type:
+                continue
+            if left_type != right_type:
                 continue
             score = cosine(left_vector, vector(right_text))
             if score < 0.72:

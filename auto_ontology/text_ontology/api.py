@@ -110,6 +110,36 @@ class GenreBody(BaseModel):
     domain: str = ""
 
 
+class QuestionBody(BaseModel):
+    text: str = ""
+
+
+class MappingBody(BaseModel):
+    source: str = ""
+    iri: str = ""
+    predicate: str = "owl:equivalentClass"
+
+
+class BaseIriBody(BaseModel):
+    base_iri: str = ""
+
+
+def _require_write(request: Request) -> None:
+    """A write needs the remote-write flag off this machine, and no extraction.
+
+    The idle check sits here so that every route that writes through this
+    helper waits for a running extraction, whose final save would erase it.
+    """
+    host = request.client.host if request.client else ""
+    if not write_allowed(host):
+        raise HTTPException(
+            status_code=403,
+            detail="Cette API est en consultation. "
+            "ONTOLOGY_API_ALLOW_WRITE=1 autorise l'écriture.",
+        )
+    _require_idle(request)
+
+
 def write_allowed(client_host: str) -> bool:
     """Local edits are allowed. A remote client writes only when asked explicitly."""
     if client_host in _LOCAL:
@@ -510,24 +540,99 @@ def install_api(app: FastAPI) -> None:
 
         return _view(studio)
 
+    @app.post("/api/v1/questions")
+    def post_question(body: QuestionBody, request: Request) -> dict[str, Any]:
+        """Save a competency question. It is not answered by a new extraction."""
+        _require_write(request)
+        studio, project = _studio(request)
+        text = body.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="La question est vide.")
+        from auto_ontology.text_ontology.studio_models import CompetencyQuestion
+
+        project.questions.append(CompetencyQuestion(id=uuid.uuid4().hex[:8], text=text))
+        studio.store.save(project, snapshot=False)
+        from auto_ontology.text_ontology.app.server import _view
+
+        return _view(studio)
+
+    @app.delete("/api/v1/questions/{question_id}")
+    def delete_question(question_id: str, request: Request) -> dict[str, Any]:
+        """Drop one competency question."""
+        _require_write(request)
+        studio, project = _studio(request)
+        project.questions = [
+            item for item in project.questions if item.id != question_id
+        ]
+        studio.store.save(project, snapshot=False)
+        from auto_ontology.text_ontology.app.server import _view
+
+        return _view(studio)
+
+    @app.post("/api/v1/mappings")
+    def post_mapping(body: MappingBody, request: Request) -> dict[str, Any]:
+        """Remember a vocabulary link. It does not rewrite the class."""
+        _require_write(request)
+        studio, project = _studio(request)
+        from auto_ontology.text_ontology.studio_models import VocabularyMapping
+
+        project.mappings = [
+            item
+            for item in project.mappings
+            if not (item.source == body.source and item.iri == body.iri)
+        ]
+        project.mappings.append(
+            VocabularyMapping(
+                source=body.source,
+                iri=body.iri,
+                predicate=body.predicate or "owl:equivalentClass",
+                accepted=True,
+            )
+        )
+        studio.store.save(project, snapshot=False)
+        from auto_ontology.text_ontology.app.server import _view
+
+        return _view(studio)
+
+    @app.put("/api/v1/base-iri")
+    def put_base(body: BaseIriBody, request: Request) -> dict[str, Any]:
+        """Set the namespace used by Turtle and JSON-LD exports."""
+        _require_write(request)
+        studio, project = _studio(request)
+        project.base_iri = body.base_iri.strip()
+        studio.store.save(project, snapshot=False)
+        from auto_ontology.text_ontology.app.server import _view
+
+        return _view(studio)
+
     @app.get("/api/tester")
     def tester() -> Response:
         """A small page that calls the typed search without leaving the app."""
-        page = """<!doctype html><meta charset="utf-8"><title>API</title>
-<style>body{font:15px/1.45 sans-serif;margin:24px;max-width:720px}textarea,input{width:100%}pre{white-space:pre-wrap;background:#f4f7fb;padding:12px}</style>
+        page = """<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Essai de l'API</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head><body class="tester">
+<main class="tester-card">
 <h1>Essai de l'API</h1>
-<p>Recherche typée sur le projet ouvert. L'écriture distante reste coupée sans ONTOLOGY_API_ALLOW_WRITE.</p>
-<form id="f"><label>Type <input name="type" value="Personne"></label>
-<label>Contient <input name="q"></label>
-<button>Chercher</button></form>
-<pre id="out"></pre>
+<p class="muted">Recherche typée sur le projet ouvert. L'écriture distante reste coupée sans ONTOLOGY_API_ALLOW_WRITE.</p>
+<form id="f" class="stack">
+<label>Type <input name="type" value="Personne"></label>
+<label>Contient <input name="q" placeholder="Nom ou fragment"></label>
+<button class="primary" type="submit">Chercher</button>
+</form>
+<pre id="out" class="tester-out">Le résultat s'affiche ici.</pre>
+</main>
 <script>
+(function(){
+var theme=localStorage.getItem("ontology.theme");
+if(theme==="dark") document.documentElement.setAttribute("data-theme","dark");
 document.getElementById("f").onsubmit=async function(e){e.preventDefault();
 const type=e.target.type.value, q=e.target.q.value;
 const body={where:q?{contains:{field:"name",value:q}}:{}};
 const r=await fetch("/api/v1/objects/"+encodeURIComponent(type)+"/search",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 document.getElementById("out").textContent=await r.text();};
-</script>"""
+})();
+</script></body></html>"""
         return Response(content=page, media_type="text/html; charset=utf-8")
 
     @app.get("/api/v1/explore")

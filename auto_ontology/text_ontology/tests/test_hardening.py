@@ -333,6 +333,8 @@ def test_an_empty_studio_lists_no_branches_without_an_error(tmp_path: Path) -> N
         ("/api/v1/branches/merge", None),
         ("/api/v1/branches/discard", None),
         ("/api/v1/notes", {"source": "a", "target": "b", "label": "n"}),
+        ("/api/v1/questions", {"text": "Qui dirige la bibliothèque ?"}),
+        ("/api/v1/mappings", {"class_name": "Personne", "target": "foaf:Person"}),
     ],
 )
 def test_api_writes_wait_for_a_running_extraction(

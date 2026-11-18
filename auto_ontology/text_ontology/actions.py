@@ -42,7 +42,7 @@ def preview_action(
         raise EditError(f"Action inconnue : {name}.")
     before = _snapshot(project)
     draft = project.model_copy(deep=True)
-    summary = _apply(draft, name, params)
+    summary = _apply(draft, name, params, applied=False)
     after = _snapshot(draft)
     return {
         "ok": True,
@@ -84,7 +84,9 @@ def commit_action(
     return diff
 
 
-def _apply(project: Project, name: str, params: dict[str, str]) -> str:
+def _apply(
+    project: Project, name: str, params: dict[str, str], *, applied: bool = True
+) -> str:
     if name == "set_status":
         return _set_status(project, params)
     if name == "change_type":
@@ -101,12 +103,17 @@ def _apply(project: Project, name: str, params: dict[str, str]) -> str:
         raise EditError(f"Action inconnue : {name}.")
     apply_edit(project, edit)
     if name == "merge":
-        return f"{params.get('source', '')} a été fusionné dans {params.get('target', '')}."
+        source, target = params.get("source", ""), params.get("target", "")
+        verb = "a été fusionné dans" if applied else "sera fusionné dans"
+        return f"{source} {verb} {target}."
     if name == "rename":
-        return f"{params.get('old', '')} s'écrit {params.get('new', '')}."
+        old, new = params.get("old", ""), params.get("new", "")
+        verb = "s'écrit" if applied else "s'écrira"
+        return f"{old} {verb} {new}."
     if name == "reject_fact":
+        lead = "Fait retiré" if applied else "Fait qui sera retiré"
         return (
-            f"Fait retiré : {params.get('subject', '')} "
+            f"{lead} : {params.get('subject', '')} "
             f"{params.get('predicate', '')} {params.get('object', '')}."
         )
     return name

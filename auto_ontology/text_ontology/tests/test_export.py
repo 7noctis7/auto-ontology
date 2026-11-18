@@ -87,13 +87,14 @@ def test_turtle_states_classes_hierarchy_individuals_and_typed_literals() -> Non
     assert ":Entreprise a owl:Class" in turtle
     assert "rdfs:subClassOf :Organisation" in turtle
     assert "rdfs:subClassOf :Produit" in turtle
-    assert (
-        ':est_dirige_par a owl:ObjectProperty ; rdfs:label "est_dirige_par" .' in turtle
-    )
-    assert ":annee_fondation a owl:DatatypeProperty" in turtle
+    assert ":estDirigePar a owl:ObjectProperty" in turtle
+    assert 'rdfs:label "est_dirige_par"' in turtle
+    assert "rdfs:domain :Entreprise" in turtle
+    assert "rdfs:range :Personne" in turtle
+    assert ":anneeFondation a owl:DatatypeProperty" in turtle
     assert ":NVIDIA a owl:NamedIndividual , :Entreprise" in turtle
-    assert ":est_dirige_par :Jensen_Huang" in turtle
-    assert ':annee_fondation "1993"^^xsd:integer' in turtle
+    assert ":estDirigePar :JensenHuang" in turtle
+    assert ':anneeFondation "1993"^^xsd:integer' in turtle
     # A leading zero means an identifier: it stays a string.
     assert ':code "007" ;' in turtle
     assert r'rdfs:comment "Société \"privée\""' in turtle
@@ -123,7 +124,7 @@ def test_turtle_local_names_are_unique_per_name() -> None:
     turtle = to_turtle(ontology)
 
     assert ":C a owl:NamedIndividual" in turtle
-    assert ":C_2 a owl:NamedIndividual" in turtle
+    assert ":C2 a owl:NamedIndividual" in turtle
 
 
 def test_cypher_is_idempotent_and_escaped() -> None:
@@ -202,7 +203,7 @@ def test_a_hand_edited_file_is_normalized_before_export() -> None:
     turtle = to_turtle(ontology)
 
     assert ":Personnes a owl:Class" in turtle
-    assert ":travaille_pour a owl:ObjectProperty" in turtle
+    assert ":travaillePour a owl:ObjectProperty" in turtle
 
 
 def test_html_lists_every_parent_and_every_type() -> None:

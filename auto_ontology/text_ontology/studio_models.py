@@ -170,6 +170,22 @@ class NoteLink(BaseModel):
     label: str = "note"
 
 
+class CompetencyQuestion(BaseModel):
+    """A question the ontology is meant to answer. METHONTOLOGY / NeOn style."""
+
+    id: str
+    text: str
+
+
+class VocabularyMapping(BaseModel):
+    """An accepted link to a public vocabulary. Suggestions are not stored here."""
+
+    source: str
+    iri: str
+    predicate: str = "owl:equivalentClass"
+    accepted: bool = True
+
+
 class Alias(BaseModel):
     """A spelling the person prefers. ``kind`` is entity, class or predicate."""
 
@@ -233,6 +249,9 @@ class Project(BaseModel):
     action_log: list[ActionEntry] = Field(default_factory=list)
     object_sets: list[ObjectSetDef] = Field(default_factory=list)
     notes: list[NoteLink] = Field(default_factory=list)
+    questions: list[CompetencyQuestion] = Field(default_factory=list)
+    mappings: list[VocabularyMapping] = Field(default_factory=list)
+    base_iri: str = ""
 
 
 class StudioSettings(BaseModel):

@@ -120,7 +120,9 @@ uv run ontology serve --watch ~/Documents/a-lire --fake
 
 The Schema and Explorer tabs separate types from instances. Corrections are
 actions with a preview and a log. A branch is a JSON copy: merge it or discard
-it. `ontology sdk --out client.py` writes a small Python client.
+it. Turtle export is OWL 2: CamelCase IRIs, French labels, domain and range
+when they are unambiguous, and PROV for the source document. Suggested links
+to FOAF or schema.org are never applied on their own. `ontology sdk --out client.py` writes a small Python client.
 `/api/tester` tries a typed search. Off this machine, set `ONTOLOGY_API_TOKEN`;
 writes also need `ONTOLOGY_API_ALLOW_WRITE=1`.
 
