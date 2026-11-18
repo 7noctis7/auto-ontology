@@ -11,12 +11,17 @@ prompt, model and chunk size, is a no-op: the facts are not duplicated.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import json
 import threading
 import time
 import uuid
 from collections.abc import Callable
+from pathlib import Path
+
 from langchain_core.language_models import BaseChatModel
+from pydantic import ValidationError
 
 from auto_ontology.text_ontology.cache import FileChunkCache
 from auto_ontology.text_ontology.documents import LoadedDocument
@@ -44,7 +49,11 @@ from auto_ontology.text_ontology.sample import (
     SAMPLE_TEXT,
     sample_ontology,
 )
-from auto_ontology.text_ontology.store import ProjectStore, now_iso
+from auto_ontology.text_ontology.store import (
+    ProjectStore,
+    atomic_write_text,
+    now_iso,
+)
 from auto_ontology.text_ontology.schema_layer import sync_schema
 from auto_ontology.text_ontology.studio_models import (
     ChunkNote,
@@ -68,11 +77,66 @@ def fingerprint(content_hash: str, prompt: str, model: str, chunk_chars: int) ->
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+# The project as an unfinished extraction found it. Resuming from it sends
+# the model the same context as the first attempt, so every chunk already
+# read comes from the cache; resuming from the project as the attempt left it
+# would not, since its partial facts change the context of every chunk.
+RESUME_FILE = "resume.json"
+
+
+class _Resume:
+    """Where an unfinished extraction of one document can pick up."""
+
+    def __init__(self, path: Path, stamp: str, document_id: str, base: str) -> None:
+        self.path = path
+        self.head = {"fingerprint": stamp, "document_id": document_id}
+        self.base = base
+
+    def mark(self, project: Project) -> None:
+        """Record the ontology as this run last saved it."""
+        head = json.dumps({**self.head, "left": _ontology_hash(project)})
+        atomic_write_text(self.path, head[:-1] + ', "ontology": ' + self.base + "}")
+
+    def clear(self) -> None:
+        with contextlib.suppress(OSError):
+            self.path.unlink()
+
+
+def _ontology_hash(project: Project) -> str:
+    return hashlib.sha256(project.ontology.model_dump_json().encode()).hexdigest()
+
+
+def _resume_base(
+    store: ProjectStore, project: Project, stamp: str, previous: DocumentRecord
+) -> TextOntology | None:
+    """The ontology from before *previous*'s unfinished run, if still valid.
+
+    Valid when the run was this very extraction (same bytes, prompt, model and
+    chunk size) and the ontology is still exactly as that run left it: no
+    edit, no other document since. Otherwise ``None``, and the extraction
+    starts from the project as it is (correct, only slower).
+    """
+    path = store.project_dir(project.id) / RESUME_FILE
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            saved.get("fingerprint") != stamp
+            or saved.get("document_id") != previous.id
+            or saved.get("left") != _ontology_hash(project)
+        ):
+            return None
+        return TextOntology.model_validate(saved["ontology"])
+    except (OSError, ValueError, KeyError, ValidationError):
+        return None
+
+
 def _complete(document: DocumentRecord) -> bool:
     """An extraction that finished: re-importing it would change nothing.
 
-    One with chunks the model did not answer is run again instead; the
-    chunk cache makes that cost only the missing chunks.
+    One with chunks the model did not answer is run again instead. Started
+    from the project as that run found it (see :func:`_resume_base`), it
+    takes from the cache every chunk before the first one that failed; an
+    interrupted run, every chunk it read.
     """
     return document.status == "ok" and not document.chunks_failed
 
@@ -165,6 +229,11 @@ def _ingest_document(
             return project
         previous = same
 
+    resumed = (
+        _resume_base(store, project, stamp, previous)
+        if previous is not None and not _complete(previous)
+        else None
+    )
     store.save(project, snapshot=True)
     naming = not project.documents and project.name in {
         "Brouillon",
@@ -176,6 +245,8 @@ def _ingest_document(
             document for document in project.documents if document.id != previous.id
         ]
         _drop_sources(project, previous.id)
+        if resumed is not None:
+            project.ontology = resumed
 
     document = DocumentRecord(
         id=uuid.uuid4().hex[:12],
@@ -209,6 +280,13 @@ def _ingest_document(
     )
 
     base = project.ontology.model_copy(deep=True)
+    resume = _Resume(
+        store.project_dir(project.id) / RESUME_FILE,
+        stamp,
+        document.id,
+        base.model_dump_json(),
+    )
+    resume.mark(project)
     # The document was appended onto the project whose ontology is base.
     # Preview merges replace project.ontology but must keep the same base.
     known_classes = [cls.name for cls in base.classes]
@@ -236,6 +314,7 @@ def _ingest_document(
             # (a book read by a local model takes hours).
             document.chunks_total = event.total
             store.save(project, snapshot=False)
+            resume.mark(project)
         if event.status == "started":
             chunk_started[event.index] = now
         elif event.index in chunk_started:
@@ -265,6 +344,7 @@ def _ingest_document(
             preview = _union(base, [chunk.ontology for chunk in raw_chunks])
             project.ontology, _warnings = normalize_ontology(preview, known_classes)
             store.save(project, snapshot=False)
+            resume.mark(project)
         on_event(
             {
                 "type": "chunk",
@@ -307,6 +387,7 @@ def _ingest_document(
         document.status = "failed"
         document.duration_s = round(time.monotonic() - started, 2)
         store.save(project, snapshot=False)
+        resume.mark(project)
         raise
 
     aligned = drop_rejected(align_names(result.ontology, memory, base), memory)
@@ -349,6 +430,10 @@ def _ingest_document(
     del home_memory.scores[:-40]
     store.save_memory(home_memory)
     store.save(project, snapshot=False)
+    if document.status == "ok":
+        resume.clear()
+    else:
+        resume.mark(project)  # a new import fills in what is missing
     on_event(
         {
             "type": "done",

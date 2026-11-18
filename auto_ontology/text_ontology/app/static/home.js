@@ -82,8 +82,8 @@
       out.extract = state.extracting !== false
         ? ["running", doc.filename + (counted ? " : " + counted + (fr ? " morceaux lus." : " chunks read.") : "")]
         : ["warn", doc.filename + (fr
-          ? " : extraction interrompue" + (counted ? " à " + counted : "") + ". Redéposez le fichier : les morceaux déjà lus viennent du cache."
-          : ": extraction interrupted" + (counted ? " at " + counted : "") + ". Drop the file again: chunks already read come from the cache.")];
+          ? " : extraction interrompue" + (counted ? " à " + counted : "") + ". Redéposez le fichier avec le même modèle : les morceaux déjà lus viennent du cache."
+          : ": extraction interrupted" + (counted ? " at " + counted : "") + ". Drop the file again with the same model: chunks already read come from the cache.")];
     } else if (broken.length) {
       out.extract = ["warn", broken.map(function (d) { return d.filename; }).join(", ") + (fr
         ? " : des morceaux sont restés sans réponse. Redéposez le fichier."
@@ -144,7 +144,7 @@
       },
       {
         key: "review", title: "Vérifier ce qui est sorti",
-        what: "Les indicateurs du haut donnent concepts, faits et morceaux en échec. Un morceau en échec n'a pas eu de réponse du modèle : redéposez le fichier, seuls les morceaux manquants sont refaits.",
+        what: "Les indicateurs du haut donnent concepts, faits et morceaux en échec. Un morceau en échec n'a pas eu de réponse du modèle : redéposez le fichier (avec le même modèle) ; les morceaux lus avant le premier échec viennent du cache.",
         site: "Documents : statut, type et domaine estimés (corrigeables). Graphe : un nœud isolé est une entité reliée à rien.",
         cli: "uv run ontology brief",
         action: ["Voir les documents", function () { openView("documents"); }]
@@ -202,7 +202,7 @@
       },
       {
         key: "review", title: "Check what came out",
-        what: "The figures at the top give concepts, facts and failed chunks. A failed chunk got no answer from the model: drop the file again, only the missing chunks are redone.",
+        what: "The figures at the top give concepts, facts and failed chunks. A failed chunk got no answer from the model: drop the file again (same model); the chunks read before the first failure come from the cache.",
         site: "Documents: status, estimated type and domain (you can correct them). Graph: a lone node is an entity linked to nothing.",
         cli: "uv run ontology brief",
         action: ["See documents", function () { openView("documents"); }]

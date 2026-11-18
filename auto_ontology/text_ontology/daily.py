@@ -258,8 +258,8 @@ def _document_state(doc: dict[str, object]) -> str:
     if status == "interrupted":
         after = f" après {progress}" if progress else ""
         return (
-            f"extraction interrompue{after}. Relancez l'import de ce fichier : "
-            "les morceaux déjà lus ne seront pas refaits."
+            f"extraction interrompue{after}. Relancez l'import de ce fichier avec "
+            "le même modèle : les morceaux déjà lus ne seront pas refaits."
         )
     if status == "failed":
         return "l'extraction a échoué. Vérifiez le modèle, puis relancez l'import."
