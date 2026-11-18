@@ -235,6 +235,31 @@ def _ingest(store: ProjectStore, loaded: object, *, label: str, force: bool = Fa
     return store.current(), events
 
 
+def test_the_chunk_count_is_saved_before_the_first_answer(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = store.create("Livre")
+    seen: list[tuple[str, int]] = []
+
+    def on_event(event: dict[str, object]) -> None:
+        if event["type"] == "chunk" and event["status"] == "started":
+            saved = store.load(project.id).documents[-1]
+            seen.append((saved.status, saved.chunks_total))
+
+    ingest_document(
+        store,
+        project,
+        load_bytes("livre.txt", SAMPLE_TEXT.encode()),
+        config=resolve_llm_config(store),
+        llm=FakeLLM(),
+        model_label="démonstration",
+        force=False,
+        cancel_event=None,
+        on_event=on_event,
+    )
+
+    assert seen and seen[0] == ("running", 1)
+
+
 def test_the_same_text_under_another_name_is_not_extracted_twice(
     tmp_path: Path,
 ) -> None:

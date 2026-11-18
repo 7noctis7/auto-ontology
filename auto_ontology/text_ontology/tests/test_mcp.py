@@ -369,6 +369,17 @@ def test_the_meeting_report_sorts_one_documents_facts(home: Path) -> None:
         meeting(ProjectStore(home).current(), "absent.pdf")
 
 
+def test_the_meeting_report_says_why_it_may_be_empty(home: Path) -> None:
+    store = ProjectStore(home)
+    project = store.current()
+    assert meeting(project).note == ""
+
+    project.documents[0].genre = "book_chapter"
+    assert "pas à une réunion" in meeting(project).markdown()
+    project.documents[0].status = "running"
+    assert meeting(project).note.startswith("Extraction en cours")
+
+
 def test_the_comparison_puts_entities_side_by_side(home: Path) -> None:
     report = comparison(
         ProjectStore(home).current(), ["Ada Lovelace", "charles babbage", "Inconnu"]

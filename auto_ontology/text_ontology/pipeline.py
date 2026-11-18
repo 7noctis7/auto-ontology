@@ -231,6 +231,11 @@ def _ingest_document(
 
     def on_chunk(event: ChunkEvent) -> None:
         now = time.monotonic()
+        if event.total and document.chunks_total != event.total:
+            # Known from the first chunk on, so the brief can show progress
+            # (a book read by a local model takes hours).
+            document.chunks_total = event.total
+            store.save(project, snapshot=False)
         if event.status == "started":
             chunk_started[event.index] = now
         elif event.index in chunk_started:

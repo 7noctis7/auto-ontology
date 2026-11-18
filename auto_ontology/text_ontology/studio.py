@@ -375,6 +375,7 @@ def daily_report(kind: str, *, since: str, as_json: bool, home: Path | None) -> 
             moment,
             read_journal(folder, moment),
             playbook_alerts(project, store.home, folder),  # type: ignore[arg-type, attr-defined]
+            extracting=store.busy_reason(project.id) is not None,  # type: ignore[attr-defined]
         )
         if kind == "brief"
         else diff(project, store.project_dir(project.id), moment)  # type: ignore[arg-type, attr-defined]

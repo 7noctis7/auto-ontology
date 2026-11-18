@@ -17,6 +17,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from auto_ontology.text_ontology.normalize import entity_key
+from auto_ontology.text_ontology.profile import GENRE_LABELS_FR
 from auto_ontology.text_ontology.studio_models import DocumentRecord, Project
 
 _PERSON = re.compile(
@@ -48,9 +49,13 @@ class Report:
     sections: list[tuple[str, list[str]]] = field(default_factory=list)
     data: dict[str, object] = field(default_factory=dict)
     table: str = ""
+    # Said before the sections: why the report may say little.
+    note: str = ""
 
     def markdown(self) -> str:
         lines = [f"# {self.title}", ""]
+        if self.note:
+            lines += [f"> {self.note}", ""]
         if self.table:
             lines += [self.table, ""]
         for heading, items in self.sections:
@@ -62,6 +67,7 @@ class Report:
     def as_dict(self) -> dict[str, object]:
         return {
             "title": self.title,
+            "note": self.note,
             **self.data,
             "markdown": self.markdown(),
         }
@@ -162,7 +168,29 @@ def meeting(project: Project, document: str | None = None) -> Report:
     }
     if record.date:
         report.sections.insert(0, ("Date", [record.date]))
+    report.note = _meeting_note(record)
     return report
+
+
+# Kinds of document that are not a meeting: the report fits them poorly.
+_NOT_MEETINGS = {"book_chapter", "scientific_paper", "contract", "financial_statement"}
+
+
+def _meeting_note(record: DocumentRecord) -> str:
+    if record.status == "running":
+        return (
+            "Extraction en cours : les faits de ce document n'y figurent qu'une "
+            "fois l'extraction terminée."
+        )
+    if record.status == "failed":
+        return "L'extraction de ce document a échoué : relancez son import."
+    if record.genre in _NOT_MEETINGS:
+        kind = GENRE_LABELS_FR.get(record.genre, record.genre).lower()
+        return (
+            f"Ce document ressemble à un(e) {kind}, pas à une réunion : "
+            "`ontology ask` et `ontology brief` lui conviennent mieux."
+        )
+    return ""
 
 
 def _cell(value: str) -> str:

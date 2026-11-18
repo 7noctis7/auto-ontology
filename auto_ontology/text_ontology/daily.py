@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from auto_ontology.text_ontology.normalize import entity_key, multi_parent_summary
-from auto_ontology.text_ontology.studio_models import Project
+from auto_ontology.text_ontology.studio_models import DocumentRecord, Project
 
 if TYPE_CHECKING:
     from auto_ontology.text_ontology.inbox import Outcome
@@ -128,7 +128,7 @@ class Brief:
         if not (self.documents or self.tables):
             lines.append("- Rien de nouveau.")
         for doc in self.documents:
-            lines.append(f"- Document **{doc['filename']}** : {doc['facts']} faits")
+            lines.append(f"- Document **{doc['filename']}** : {_document_state(doc)}")
         for table in self.tables:
             lines.append(
                 f"- Table **{table['table']}** : {table['rows']} lignes ({table['source']})"
@@ -158,6 +158,8 @@ def brief(
     since: datetime,
     journal: Sequence[Outcome] = (),
     extra_alerts: Sequence[str] = (),
+    *,
+    extracting: bool = False,
 ) -> Brief:
     """What *project* gained since *since*, and what deserves a look.
 
@@ -165,6 +167,9 @@ def brief(
     :func:`inbox.read_journal`): it adds what was skipped or failed, which
     the project itself does not remember. *extra_alerts* come first (the
     playbook's findings, see :func:`playbooks.playbook_alerts`).
+    *extracting* says whether an extraction holds the project now
+    (:meth:`ProjectStore.busy_reason`): a document still marked running
+    without one was interrupted, and the brief says how to resume it.
     """
     new_documents = [
         d for d in project.documents if (_moment(d.added_at) or since) >= since
@@ -194,6 +199,9 @@ def brief(
             "filename": d.filename,
             "added_at": d.added_at,
             "facts": facts_per_document[d.id],
+            "status": _status(d, extracting),
+            "chunks_done": len(d.chunk_notes),
+            "chunks_total": d.chunks_total,
         }
         for d in new_documents
     ]
@@ -224,6 +232,41 @@ def brief(
         dict.fromkeys(e.filename for e in journal if e.kind == "duplicate")
     )
     return result
+
+
+def _status(document: DocumentRecord, extracting: bool) -> str:
+    """The document's status, with ``interrupted`` for a run that died."""
+    if document.status == "running" and not extracting:
+        return "interrupted"
+    return document.status
+
+
+def _progress(doc: dict[str, object]) -> str:
+    total = doc.get("chunks_total") or 0
+    return f"{doc.get('chunks_done', 0)}/{total} morceaux" if total else ""
+
+
+def _document_state(doc: dict[str, object]) -> str:
+    """One brief line: the facts, or why there are none yet."""
+    status, progress = doc.get("status"), _progress(doc)
+    if status == "running":
+        done = f", {progress} lus" if progress else " (lecture du texte)"
+        return (
+            f"extraction en cours{done}. Ses faits seront comptés à la fin ; "
+            "la page du studio montre l'avancement."
+        )
+    if status == "interrupted":
+        after = f" après {progress}" if progress else ""
+        return (
+            f"extraction interrompue{after}. Relancez l'import de ce fichier : "
+            "les morceaux déjà lus ne seront pas refaits."
+        )
+    if status == "failed":
+        return "l'extraction a échoué. Vérifiez le modèle, puis relancez l'import."
+    if status == "cancelled":
+        after = f" après {progress}" if progress else ""
+        return f"{doc['facts']} faits (extraction annulée{after})"
+    return f"{doc['facts']} faits"
 
 
 def _alerts(project: Project) -> list[str]:

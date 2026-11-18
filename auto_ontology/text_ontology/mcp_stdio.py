@@ -484,7 +484,13 @@ class StudioMcp:
 
         folder = self.store.project_dir(project.id)
         alerts = playbook_alerts(project, self.store.home, folder)
-        report = brief(project, moment, read_journal(folder, moment), alerts)
+        report = brief(
+            project,
+            moment,
+            read_journal(folder, moment),
+            alerts,
+            extracting=self.store.busy_reason(project.id) is not None,
+        )
         return {**report.as_dict(), "markdown": report.markdown()}
 
     def _check(self, project: Project, a: dict[str, Any]) -> object:

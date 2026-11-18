@@ -486,7 +486,8 @@ def install_api(app: FastAPI) -> None:
         folder = studio.store.project_dir(project.id)
         journal = read_journal(folder, moment)
         alerts = playbook_alerts(project, studio.store.home, folder)
-        result = brief(project, moment, journal, alerts)
+        extracting = studio.store.busy_reason(project.id) is not None
+        result = brief(project, moment, journal, alerts, extracting=extracting)
         return {**result.as_dict(), "markdown": result.markdown()}
 
     @app.get("/api/v1/diff")

@@ -77,6 +77,30 @@ def test_brief_lists_what_came_in_and_what_to_check(home: Path) -> None:
     assert "## À vérifier" in text
 
 
+def test_brief_says_an_extraction_is_running_or_was_interrupted(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = ProjectStore(home)
+    project = store.current()
+    document = project.documents[0]
+    document.status = "running"
+    document.chunks_total = 310
+    store.save(project)
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    done = len(document.chunk_notes)
+
+    running = brief(store.current(), since, extracting=True)
+    stopped = brief(store.current(), since)
+
+    assert running.documents[0]["status"] == "running"
+    assert f"extraction en cours, {done}/310 morceaux lus" in running.markdown()
+    assert stopped.documents[0]["status"] == "interrupted"
+    assert f"extraction interrompue après {done}/310 morceaux" in stopped.markdown()
+    with store.busy(project.id):  # what another process sees during a run
+        assert studio.main(["brief", "--home", str(home)]) == 0
+    assert "extraction en cours" in capsys.readouterr().out
+
+
 def test_brief_since_later_reports_nothing_new(home: Path) -> None:
     report = brief(
         ProjectStore(home).current(), datetime.now(timezone.utc) + timedelta(hours=1)
