@@ -14,6 +14,23 @@ Mermaid, RDF/OWL or Neo4j. It is separate from semantic compilation, which
 builds the semantic layer from database tables, but it can reuse that layer's
 glossary. It never writes to the store.
 
+The local studio is the way to use it by hand. One command, from the
+repository root, opens a page where a document can be dropped:
+
+```bash
+uv run ontology serve
+```
+
+No Postgres and no login. PDF, EPUB, DOCX, HTML, Markdown and plain text are
+accepted. `--fake` runs a deterministic stand-in when no model key is
+available, and the page itself includes an example that does not call a
+model. The page also types each document, offers a guide, proposed
+dashboards, and a read API at `/docs`. Corrections are reused in the next
+prompt; they do not train a model. `ontology import`, `ontology ask` and
+`ontology mcp` script the same project. The CLI below remains the way to
+script one extraction. The page also keeps a schema, saved sets, a lineage
+chain, project branches, and `ontology sdk` for a generated Python client.
+
 ## Output
 
 ```json
@@ -71,6 +88,10 @@ and works with whatever model is loaded:
 
 `--provider local` forces this path for a remote OpenAI-compatible server, and
 `--provider hosted` forces the application's own client.
+
+The studio (`ontology serve`) takes the same path for a local endpoint. It
+reads `.env` the same way, needs no key or model name for a local server, and
+records which model answered on each document.
 
 A local model is slower than a hosted one, and a small one extracts better
 from short, clean chunks. A good starting point is:
@@ -155,7 +176,7 @@ uv run python -m auto_ontology.text_ontology export projet.json -f cypher -o imp
 
 | Format | File | Use it for |
 | --- | --- | --- |
-| `html` | `.html` | Opening in a browser. Classes are blue boxes and entities are orange dots. A class with several parents has a dashed outline and a ⚠. Selecting a node highlights its neighbours. The **Classes** tab is the class tree with instance counts, and clicking a class highlights its whole family. The **Table** tab lists every relation and attribute and can be filtered. There are network and hierarchy layouts, PNG export, and light and dark themes. The graph library loads from unpkg; without a connection, the tree and the table still work. |
+| `html` | `.html` | Opening in a browser. Classes are blue boxes and entities are orange dots. A class with several parents has a dashed outline and a ⚠. Selecting a node highlights its neighbours. The **Classes** tab is the class tree with instance counts, and clicking a class highlights its whole family. The **Table** tab lists every relation and attribute and can be filtered. There are network and hierarchy layouts, PNG export, and light and dark themes. The studio's Download menu inlines the graph library, so that copy opens offline. |
 | `mermaid` | `.mmd` | Pasting into anything that renders Mermaid (mermaid.live, GitHub, Notion, Obsidian). Classes are hexagons and individuals are boxes. Dotted arrows are `est_un`. |
 | `turtle` | `.ttl` | RDF/OWL tools (Protégé, a triple store, SPARQL). Classes are `owl:Class` with `rdfs:subClassOf`, predicates are `owl:ObjectProperty`, attribute keys are `owl:DatatypeProperty`, and entities are `owl:NamedIndividual`. Integers, decimals, booleans and ISO dates get an `xsd` type. A number with a leading zero stays a string. `--base-iri` sets the namespace. |
 | `cypher` | `.cypher` | Neo4j, through cypher-shell or the Browser. The script uses `MERGE` only, so running it twice changes nothing. Classes are `:Classe` nodes linked by `EST_UN`. Entities are `:Entite` nodes that carry their classes as labels and link to them with `A_POUR_TYPE`. |

@@ -16,6 +16,107 @@ It enables developers to:
 - Expose: serve context to any agent harness through MCP, CLI, and API.
 Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
+## Text ontology studio
+
+Drop a document and see its ontology, without Postgres, a login or the chat workers.
+From the repository root:
+
+```bash
+uv run ontology serve
+```
+
+That one command installs the project if needed, starts a local page on
+<http://127.0.0.1:4173> and opens it. Projects are JSON files in `~/AutoOntology`
+(override with `ONTOLOGY_HOME` or `--home`). The same app is
+`uv run python -m auto_ontology.text_ontology serve`.
+
+The page accepts PDF, EPUB, DOCX, HTML, Markdown and plain text, pasted text
+included. Extraction streams chunk by chunk and can be cancelled. The graph
+library is served from the app, so the page works offline apart from the LLM
+call. `ontology serve --fake` draws a graph without calling a model, and the
+empty page offers a built-in example that does not need a key.
+
+The model stays the NVIDIA reasoning default (`REASONING_API_KEY`,
+`REASONING_ENDPOINT`, `REASONING_MODEL`, with the same fallbacks as the rest
+of the product). Point it at any OpenAI-compatible server instead:
+
+```bash
+ONTOLOGY_LLM_API_KEY=sk-... \
+ONTOLOGY_LLM_ENDPOINT=https://api.openai.com/v1 \
+ONTOLOGY_LLM_MODEL=gpt-4o \
+uv run ontology serve
+```
+
+A server on this machine or the private network (LM Studio, Ollama,
+llama.cpp) needs neither a key nor a model name: with only
+`REASONING_ENDPOINT=http://127.0.0.1:1234/v1` in `.env`, the studio uses the
+model the server has loaded, whatever it is, and adapts to it (a JSON schema
+the model refuses, reasoning blocks, Markdown fences). The page shows which
+model answered.
+
+`ONTOLOGY_LLM_*` wins over `REASONING_*`, and both win over the settings file
+the page writes (mode `0600`, under the home directory). With no key, the page
+says so and still opens the example. Exports (HTML with the graph library
+inlined, Mermaid, Turtle, Cypher, CSV, JSON-LD) are in the Download menu.
+
+Dependencies beyond the existing server are pypdf and python-docx, used only
+to read PDF and DOCX. EPUB and HTML are read with the standard library.
+
+Several documents in one project are typed (contract, paper, report, chapter,
+financial statement, email, notes) with a confidence, a domain and basic
+metadata. The Documents view shows them; the graph can be filtered by document,
+type, or concepts shared across files. A correction is remembered: renames,
+merges and rejected facts are written into `~/AutoOntology/memory.json` and
+added to the next prompt. That is not model training. `Tableaux HTML` and
+`JSONL` in the Download menu export pinned dashboards and a triplet file that
+could later be used for fine-tuning.
+
+The HTTP API is the same process. Interactive docs: <http://127.0.0.1:4173/docs>.
+Set `ONTOLOGY_API_TOKEN` when the server is reachable beyond this machine;
+clients that are not local must then send `Authorization: Bearer`.
+
+The studio has no login, so it answers only to its own host names
+(127.0.0.1, localhost) and refuses a write sent by another web site. A page
+you visit therefore cannot read your projects or redirect your API key, even
+through DNS rebinding. To open it from another machine, add the name used in
+`ONTOLOGY_ALLOWED_HOSTS` and set `ONTOLOGY_API_TOKEN`. Uploads are capped at
+50 MB (`ONTOLOGY_MAX_UPLOAD_MB`), and an EPUB or DOCX that would expand to an
+abnormal size is not opened.
+
+```bash
+curl -s http://127.0.0.1:4173/api/v1/concepts
+curl -s "http://127.0.0.1:4173/api/v1/search?q=Lyon"
+curl -s "http://127.0.0.1:4173/api/v1/concepts/Camille%20Martin/neighbours"
+curl -s http://127.0.0.1:4173/api/v1/facts
+curl -s -X POST http://127.0.0.1:4173/api/v1/ask \
+  -H 'content-type: application/json' \
+  -d '{"question":"qui dirige la bibliothèque"}'
+curl -s "http://127.0.0.1:4173/api/v1/export?format=turtle" -o ontologie.ttl
+```
+
+Other commands, still one install:
+
+```bash
+uv run ontology import contrat.pdf article.txt --fake
+uv run ontology ask "qui dirige la bibliothèque"
+uv run ontology mcp
+uv run ontology serve --watch ~/Documents/a-lire --fake
+```
+
+The Schema and Explorer tabs separate types from instances. Corrections are
+actions with a preview and a log. A branch is a JSON copy: merge it or discard
+it. `ontology sdk --out client.py` writes a small Python client.
+`/api/tester` tries a typed search. Off this machine, set `ONTOLOGY_API_TOKEN`;
+writes also need `ONTOLOGY_API_ALLOW_WRITE=1`.
+
+`ontology mcp` speaks MCP on standard input. It can read and preview an
+action. Applying a change from a remote client needs the write flag.
+A textless PDF is flagged as a scan. If Tesseract is on the PATH the page says
+so; the binary is not launched. Neighbour search uses local character
+trigrams, and a candidate is never merged on its own. Writing the result back
+into the Postgres catalog is still out of this pass. Details:
+[docs/text-ontology.md](docs/text-ontology.md).
+
 ## Benchmarks
 
 To run a text-to-SQL benchmark such as BIRD, refer to the

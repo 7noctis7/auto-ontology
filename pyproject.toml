@@ -63,7 +63,12 @@ dependencies = [
     # Not imported, but FastAPI refuses to register the model-import upload
     # route without it.
     "python-multipart>=0.0.32",
+    "pypdf>=7.1.0",
+    "python-docx>=1.2.0",
 ]
+
+[project.scripts]
+ontology = "auto_ontology.text_ontology.studio:main"
 
 [project.optional-dependencies]
 kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]

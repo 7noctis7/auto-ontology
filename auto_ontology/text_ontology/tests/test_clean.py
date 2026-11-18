@@ -109,3 +109,31 @@ def test_clean_prose_is_left_alone() -> None:
 
     assert result.text == text
     assert result.summary() is None
+
+
+def test_line_end_hyphens_keep_compounds_and_rejoin_cuts() -> None:
+    from auto_ontology.text_ontology.clean import rejoin_line_breaks
+
+    text = (
+        "The network uses hash-based proof-\nof-work to prevent double-\n"
+        "spending in a peer-to-\npeer network, and the spending is checked. "
+        "A computa-\ntional proof is computational. La compu-\ntation du serveur."
+    )
+
+    joined = rejoin_line_breaks(text)
+
+    assert "proof-of-work" in joined
+    assert "double-spending" in joined
+    assert "peer-to-peer" in joined
+    assert "computational proof" in joined
+    assert "computation du serveur" in joined
+
+
+def test_list_items_are_not_taken_for_diagram_labels() -> None:
+    text = (
+        "The library lends books to every registered reader in the city.\n"
+        "- Paris\n- Lyon\n- Marseille\n"
+        "Each branch keeps its own catalogue and opening hours for readers.\n"
+    )
+
+    assert "- Lyon" in clean_text(text).text

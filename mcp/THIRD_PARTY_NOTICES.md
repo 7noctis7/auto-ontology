@@ -60,6 +60,15 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | tqdm | >=4.70.0 | MPL-2.0 AND MIT | https://github.com/tqdm/tqdm |
 | trino | >=0.339.0 | Apache-2.0 | https://github.com/trinodb/trino-python-client |
 | Uvicorn (`uvicorn[standard]`) | >=0.52.4 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
+| pypdf | >=7.1.0 | BSD-3-Clause | https://github.com/py-pdf/pypdf |
+| python-docx | >=1.2.0 | MIT | https://github.com/python-openxml/python-docx |
+
+pypdf reads PDF text for the studio. EPUB is a zip of HTML and is read with
+the standard library. python-docx reads DOCX. HTML is parsed with the
+standard library. The studio also vendors vis-network 9.1.9 (Apache-2.0 OR
+MIT), unmodified, under `auto_ontology/text_ontology/app/static/vendor/`.
+License texts sit next to the file. Copyright (c) vis.js contributors,
+https://github.com/visjs/vis-network.
 
 The `binary` extra installs the `psycopg-binary` wheel, which bundles
 prebuilt native libraries rather than linking the system ones. Those carry

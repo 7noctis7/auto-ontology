@@ -13,9 +13,11 @@ created again (rule 1 of the system prompt). The union is then normalized by
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -25,6 +27,7 @@ from typing import Literal
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from auto_ontology.text_ontology.cache import ChunkCache, chunk_cache_key
 from auto_ontology.text_ontology.clean import clean_text
 from auto_ontology.text_ontology.local_llm import (
     LocalChatModel,
@@ -64,10 +67,30 @@ class TextOntologyExtractionError(RuntimeError):
     """The LLM gave no usable extraction for a chunk of the text."""
 
 
+@dataclass(frozen=True)
+class ChunkEvent:
+    """Progress of one chunk, for a UI or a log.
+
+    ``status`` is ``started``, ``ok``, ``cached``, ``failed`` or ``cancelled``.
+    ``ontology`` is the raw answer of that chunk, before the final normalize.
+    """
+
+    index: int
+    total: int
+    status: str
+    text: str
+    ontology: TextOntology | None = None
+
+
 @lru_cache(maxsize=1)
 def load_system_prompt() -> str:
     """The ontology-architect system prompt, read once from the package."""
     return _PROMPT_PATH.read_text(encoding="utf-8").strip()
+
+
+def prompt_version() -> str:
+    """Short hash of the system prompt, recorded on every extraction."""
+    return hashlib.sha256(load_system_prompt().encode()).hexdigest()[:16]
 
 
 def _split_long(paragraph: str, max_chars: int) -> list[str]:
@@ -136,6 +159,7 @@ def build_user_message(
     known_classes: Sequence[str] = (),
     known_predicates: Sequence[str] = (),
     known_entities: Sequence[str] = (),
+    preface: str = "",
 ) -> str:
     """The human turn for one chunk: what to reuse, then the text itself.
 
@@ -143,6 +167,9 @@ def build_user_message(
     a document are analysed rather than followed.
     """
     lines: list[str] = []
+    if preface.strip():
+        lines.append(preface.strip())
+        lines.append("")
     if known_classes or known_predicates or known_entities:
         lines.append(
             "Concepts déjà présents dans l'ontologie. Réutilise ces noms exacts "
@@ -176,6 +203,11 @@ def _reuse_context(
         dict.fromkeys(n for t in so_far.triplets for n in (t.subject, t.object))
     )
     return classes, predicates, entities
+
+
+def _emit(on_chunk: Callable[[ChunkEvent], None] | None, event: ChunkEvent) -> None:
+    if on_chunk is not None:
+        on_chunk(event)
 
 
 Backend = Callable[[str, str], "TextOntology | None"]
@@ -265,7 +297,12 @@ def extract_text_ontology(
     skip_failed_chunks: bool = False,
     clean: bool = False,
     backend: Backend | None = None,
-    llm: BaseChatModel | None = None,
+    llm: BaseChatModel | Backend | None = None,
+    cache: ChunkCache | None = None,
+    on_chunk: Callable[[ChunkEvent], None] | None = None,
+    cancel_event: threading.Event | None = None,
+    model_name: str = "",
+    preface: str = "",
 ) -> TextOntologyResult:
     """Extract and normalize the ontology stated in *text*.
 
@@ -278,6 +315,14 @@ def extract_text_ontology(
 
     *backend* answers each chunk; it defaults to :func:`resolve_backend`, and
     *llm* wraps a given chat model in the application's structured call.
+
+    *cache* stores a successful answer under a key of the prompt, the model
+    name and the exact message, so a repeated chunk does not call the model
+    again; *model_name* defaults to the backend's description. *on_chunk*
+    hears each chunk start and finish. *cancel_event* stops the loop between
+    chunks and returns what was already extracted, with ``cancelled`` set.
+    *preface* is put at the head of every chunk's message (document type,
+    corrections to reuse).
 
     Raises ``ValueError`` for blank text, ``EnvironmentError`` when no LLM is
     configured, and :class:`TextOntologyExtractionError` when a chunk gets no
@@ -296,18 +341,34 @@ def extract_text_ontology(
         raise ValueError("text is blank")
 
     if backend is None:
-        backend = (
-            StructuredBackend(llm)
-            if llm is not None
-            else resolve_backend(max_tokens=max_tokens)
-        )
+        if llm is None:
+            backend = resolve_backend(max_tokens=max_tokens)
+        elif hasattr(llm, "with_structured_output"):
+            backend = StructuredBackend(llm)
+        else:
+            # Already a backend, such as a LocalChatModel built for the studio.
+            backend = llm
     system = load_system_prompt()
     # The base goes first so its spellings win when the merge reconciles names.
     collected = base.model_copy(deep=True) if base is not None else TextOntology()
     failed: list[int] = []
+    cancelled = False
     backend_notes: list[str] = getattr(backend, "notes", [])
+    cache_model = model_name or str(getattr(backend, "description", ""))
 
     for index, chunk in enumerate(chunks, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            cancelled = True
+            logger.warning(
+                "Text ontology cancelled before chunk %d/%d", index, len(chunks)
+            )
+            _emit(
+                on_chunk,
+                ChunkEvent(
+                    index=index, total=len(chunks), status="cancelled", text=chunk
+                ),
+            )
+            break
         classes, predicates, entities = list(known_classes), [], []
         if collected.classes or collected.triplets:
             so_far, _ = normalize_ontology(collected, known_classes)
@@ -320,13 +381,29 @@ def extract_text_ontology(
             known_classes=classes,
             known_predicates=predicates,
             known_entities=entities,
+            preface=preface,
         )
-        seen_notes = len(backend_notes)
-        result = backend(system, message)
-        notes.extend(
-            f"Chunk {index}/{len(chunks)}: {note}"
-            for note in backend_notes[seen_notes:]
+        _emit(
+            on_chunk,
+            ChunkEvent(index=index, total=len(chunks), status="started", text=chunk),
         )
+        cache_key = chunk_cache_key(
+            prompt=system, model_name=cache_model, message=message
+        )
+        cached = cache.get(cache_key) if cache is not None else None
+        if cached is not None:
+            result: TextOntology | None = cached.model_copy(deep=True)
+            status = "cached"
+        else:
+            seen_notes = len(backend_notes)
+            result = backend(system, message)
+            notes.extend(
+                f"Chunk {index}/{len(chunks)}: {note}"
+                for note in backend_notes[seen_notes:]
+            )
+            status = "ok" if result is not None else "failed"
+            if result is not None and cache is not None:
+                cache.put(cache_key, result)
         if result is None:
             if not skip_failed_chunks:
                 raise TextOntologyExtractionError(
@@ -335,11 +412,16 @@ def extract_text_ontology(
                 )
             logger.warning("Text ontology chunk %d/%d skipped", index, len(chunks))
             failed.append(index)
+            _emit(
+                on_chunk,
+                ChunkEvent(index=index, total=len(chunks), status="failed", text=chunk),
+            )
             continue
         logger.info(
-            "Text ontology chunk %d/%d: %d classes, %d triplets, %d attributes",
+            "Text ontology chunk %d/%d (%s): %d classes, %d triplets, %d attributes",
             index,
             len(chunks),
+            status,
             len(result.classes),
             len(result.triplets),
             len(result.attributes),
@@ -347,6 +429,16 @@ def extract_text_ontology(
         collected.classes.extend(result.classes)
         collected.triplets.extend(result.triplets)
         collected.attributes.extend(result.attributes)
+        _emit(
+            on_chunk,
+            ChunkEvent(
+                index=index,
+                total=len(chunks),
+                status=status,
+                text=chunk,
+                ontology=result,
+            ),
+        )
 
     ontology, warnings = normalize_ontology(collected, known_classes)
     # Two chunks can trip the same repair; say it once.
@@ -360,9 +452,16 @@ def extract_text_ontology(
             f"INCOMPLETE: chunk(s) {listed} of {len(chunks)} got no valid answer "
             "from the LLM and were skipped; their facts are missing.",
         )
+    if cancelled:
+        warnings.insert(
+            0,
+            "CANCELLED: extraction stopped on request; chunks that were not "
+            f"sent to the model are missing (of {len(chunks)}).",
+        )
     return TextOntologyResult(
         ontology=ontology,
         warnings=warnings,
         chunks=len(chunks),
         failed_chunks=failed,
+        cancelled=cancelled,
     )

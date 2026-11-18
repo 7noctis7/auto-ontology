@@ -89,3 +89,7 @@ class TextOntologyResult(BaseModel):
         default_factory=list,
         description="Chunks skipped because the LLM gave no valid answer.",
     )
+    cancelled: bool = Field(
+        default=False,
+        description="The run stopped before every chunk because it was cancelled.",
+    )

@@ -38,6 +38,10 @@ _CODE_PATTERNS = [
     re.compile(r"^\s*(?:def|class)\s+\w+.*:\s*$"),
     re.compile(r"^\s*return\b[^.]*;\s*$"),
 ]
+_BULLET = re.compile(r"^\s*(?:[-•*–·▪◦]|\(?\d{1,3}[.)])\s+\S")
+_LINE_HYPHEN = re.compile(r"([^\W\d_]+)-\n([^\W\d_]+-?)")
+_WORD = re.compile(r"[^\W\d_]+")
+_COMPOUND = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)+")
 _MATH = re.compile(r"[=<>≤≥≠∑∏∞∫√±×÷⋅−^{}|]")
 _SENTENCE_END = re.compile(r"[.!?:…]\s*$")
 
@@ -48,6 +52,16 @@ class CleanResult:
 
     text: str
     removed: dict[str, int] = field(default_factory=dict)
+
+    def summary_fr(self) -> str | None:
+        """The same summary in French, for the studio."""
+        total = sum(self.removed.values())
+        if not total:
+            return None
+        return (
+            f"Bruit de PDF retiré : {total} élément{'s' if total > 1 else ''} "
+            "(schémas, code, formules, renvois, bibliographie)."
+        )
 
     def summary(self) -> str | None:
         """``"Text cleaned: removed 12 diagram-label lines, ..."`` or ``None``."""
@@ -80,10 +94,64 @@ def _is_fragment(line: str) -> bool:
     return all(len(token) <= 2 for token in line.split())
 
 
+@dataclass(frozen=True)
+class _Vocabulary:
+    """What the text spells elsewhere: whole words and hyphenated compounds."""
+
+    words: frozenset[str]
+    compounds: frozenset[str]
+
+
+def _vocabulary(text: str) -> _Vocabulary:
+    unbroken = _LINE_HYPHEN.sub(" ", text)
+    return _Vocabulary(
+        words=frozenset(w.lower() for w in _WORD.findall(unbroken)),
+        compounds=frozenset(c.lower() for c in _COMPOUND.findall(unbroken)),
+    )
+
+
+def _join_hyphenated(left: str, right: str, vocabulary: _Vocabulary) -> str:
+    """Rejoin a word cut by a hyphen at a line end, keeping a real compound's hyphen.
+
+    ``computa-`` + ``tional`` is a typesetter's cut; ``proof-`` + ``of-work``
+    and ``double-`` + ``spending`` are compounds. The text itself decides:
+    the joined word spelled whole elsewhere means a cut; the hyphenated form
+    elsewhere, or a second part that is a word of its own, means a compound.
+    Anything else is taken for a cut, as most line-end hyphens are.
+    """
+    first_words, second_words = _WORD.findall(left), _WORD.findall(right)
+    first = first_words[-1].lower() if first_words else ""
+    second = second_words[0].lower() if second_words else ""
+    if not (first and second):
+        return left + "-" + right
+    continues = right.lstrip().startswith(second_words[0] + "-")  # of-work
+    if first + second in vocabulary.words:
+        return left + right
+    if (
+        continues
+        or f"{first}-{second}" in vocabulary.compounds
+        or second in vocabulary.words
+    ):
+        return left + "-" + right
+    return left + right
+
+
+def rejoin_line_breaks(text: str) -> str:
+    """Rejoin words cut by a hyphen at a line end (see :func:`_join_hyphenated`)."""
+    vocabulary = _vocabulary(text)
+    return _LINE_HYPHEN.sub(
+        lambda m: _join_hyphenated(m.group(1), m.group(2), vocabulary), text
+    )
+
+
 def _is_short_label(line: str) -> bool:
     """A line that reads like a diagram label: a few words, no sentence end."""
     stripped = line.strip()
-    if _NUMBERED_HEADING.match(stripped) or _SENTENCE_END.search(stripped):
+    if (
+        _NUMBERED_HEADING.match(stripped)
+        or _SENTENCE_END.search(stripped)
+        or _BULLET.match(stripped)  # a list item, not a label
+    ):
         return False
     return len(stripped.split()) <= 4
 
@@ -122,7 +190,7 @@ def _drop_label_runs(lines: list[str], removed: dict[str, int]) -> list[str]:
     return kept
 
 
-def _paragraphs(lines: list[str]) -> list[str]:
+def _paragraphs(lines: list[str], vocabulary: _Vocabulary) -> list[str]:
     """Rejoin lines wrapped at the page width into paragraphs."""
     prose = [len(line) for line in lines if len(line.split()) > 6]
     width = statistics.quantiles(prose, n=4)[2] if len(prose) >= 4 else 0
@@ -145,7 +213,7 @@ def _paragraphs(lines: list[str]) -> list[str]:
         if not current:
             current = line
         elif current.endswith("-") and line[:1].islower():
-            current += line  # proof-\nof-work -> proof-of-work
+            current = _join_hyphenated(current[:-1], line, vocabulary)
         else:
             current += " " + line
         # A sentence ending well short of the page width ends the paragraph.
@@ -164,9 +232,9 @@ def clean_text(text: str) -> CleanResult:
     def count(kind: str, n: int = 1) -> None:
         removed[kind] = removed.get(kind, 0) + n
 
-    lines = (
-        text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").split("\n")
-    )
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
+    vocabulary = _vocabulary(text)
+    lines = text.split("\n")
 
     # The reference list runs to the end once its heading is past the middle.
     for index, line in enumerate(lines):
@@ -195,5 +263,6 @@ def clean_text(text: str) -> CleanResult:
 
     kept = _drop_label_runs(kept, removed)
     return CleanResult(
-        text="\n\n".join(_paragraphs(kept)).strip() + "\n", removed=removed
+        text="\n\n".join(_paragraphs(kept, vocabulary)).strip() + "\n",
+        removed=removed,
     )
