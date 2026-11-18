@@ -457,6 +457,31 @@ def install_api(app: FastAPI) -> None:
             return {"results": semantic_search(project, q), "auto_merge": False}
         return {"candidates": merge_candidates(project), "auto_merge": False}
 
+    @app.get("/api/v1/brief")
+    def get_brief(request: Request, since: str = "24h") -> dict[str, Any]:
+        """What came in since *since* (24h, 7d, a date), and what to check."""
+        from auto_ontology.text_ontology.daily import brief, parse_since
+
+        try:
+            moment = parse_since(since)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        result = brief(_project(request), moment)
+        return {**result.as_dict(), "markdown": result.markdown()}
+
+    @app.get("/api/v1/diff")
+    def get_diff(request: Request, since: str = "7d") -> dict[str, Any]:
+        """Classes, facts and attributes added or removed since *since*."""
+        from auto_ontology.text_ontology.daily import diff, parse_since
+
+        try:
+            moment = parse_since(since)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        studio, project = _studio(request)
+        result = diff(project, studio.store.project_dir(project.id), moment)
+        return {**result.as_dict(), "markdown": result.markdown()}
+
     @app.get("/api/v1/tables")
     def get_tables(request: Request) -> dict[str, Any]:
         """Tables loaded from spreadsheets: columns, types, row counts, samples."""

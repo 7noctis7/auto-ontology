@@ -67,13 +67,26 @@ _COMMANDS = ("extract", "merge", "export", "clean", "eval")
 # Served by the studio's own parser (auto_ontology.text_ontology.studio): both
 # entry points, `ontology` and `python -m auto_ontology.text_ontology`, accept
 # every command and hand the other group over.
-STUDIO_COMMANDS = ("open", "serve", "import", "tables", "sql", "ask", "mcp", "sdk")
+STUDIO_COMMANDS = (
+    "open",
+    "serve",
+    "import",
+    "brief",
+    "diff",
+    "tables",
+    "sql",
+    "ask",
+    "mcp",
+    "sdk",
+)
 
 _EPILOG = """\
 Studio commands (same entry point):
   open     one folder, one command: project, import, watching and studio
   serve    open the local studio in the browser (no database, no login)
   import   add files to the current project (spreadsheets become tables)
+  brief    what came in since a moment (24h by default), and what to check
+  diff     classes, facts and attributes added or removed since a moment
   tables   list the current project's tables: columns, types, samples
   sql      one read-only SELECT on those tables
   ask      answer from the current project's facts, with sources
@@ -88,9 +101,18 @@ class CliError(Exception):
     """A failure to report in one line, without a traceback."""
 
 
-def _read_text(paths: list[str]) -> str:
-    """The text of every input: stdin, plain text, or PDF/EPUB/DOCX/HTML."""
+def _read_text(paths: list[str], *, paste: bool = False) -> str:
+    """The text of every input: stdin, plain text, PDF/EPUB/DOCX/HTML, clipboard."""
     texts: list[str] = []
+    if paste:
+        from auto_ontology.text_ontology.daily import ClipboardError, read_clipboard
+
+        try:
+            texts.append(read_clipboard())
+        except ClipboardError as exc:
+            raise CliError(str(exc)) from exc
+        if paths == ["-"]:  # the default: no file named, so not stdin either
+            paths = []
     for path in paths:
         if path == "-":
             texts.append(sys.stdin.read())
@@ -150,7 +172,7 @@ def _extract(args: argparse.Namespace) -> None:
     )
     print(f"model: {backend.description}", file=sys.stderr)
     result = extract_text_ontology(
-        _read_text(args.inputs),
+        _read_text(args.inputs, paste=args.paste),
         known_classes=known_classes,
         known_predicates=args.known_predicate,
         max_chunk_chars=args.chunk_chars,
@@ -328,6 +350,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip a chunk the LLM cannot answer instead of failing; the result "
         "is then marked INCOMPLETE in the warnings.",
+    )
+    extract.add_argument(
+        "--paste",
+        action="store_true",
+        help="Extract the clipboard's text (alone, or with the files named).",
     )
     extract.add_argument(
         "--lang",

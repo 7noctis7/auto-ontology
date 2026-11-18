@@ -14,7 +14,7 @@ import json
 import re
 
 from auto_ontology.text_ontology.normalize import normalize_ontology
-from auto_ontology.text_ontology.store import ProjectStore
+from auto_ontology.text_ontology.store import ProjectStore, atomic_write_text
 from auto_ontology.text_ontology.studio_models import Project
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$")
@@ -145,9 +145,7 @@ def _write_named(store: ProjectStore, project: Project, name: str) -> None:
     _check(name) if name != "main" else None
     folder = store.project_dir(project.id) / "branches"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{name}.json").write_text(
-        project.model_dump_json(indent=2) + "\n", encoding="utf-8"
-    )
+    atomic_write_text(folder / f"{name}.json", project.model_dump_json(indent=2) + "\n")
 
 
 def read_branch(store: ProjectStore, project_id: str, name: str) -> Project:
@@ -168,4 +166,4 @@ def _read_named(store: ProjectStore, project_id: str, name: str) -> Project:
 
 def _point(store: ProjectStore, project_id: str, name: str) -> None:
     path = store.project_dir(project_id) / "branch.json"
-    path.write_text(json.dumps({"active": name}) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps({"active": name}) + "\n")

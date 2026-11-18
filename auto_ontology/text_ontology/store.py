@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,29 @@ _PROJECT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 def now_iso() -> str:
     """Current UTC time, second precision, for project timestamps."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    """Write *path* so that a reader sees the old content or the new, never half.
+
+    A uniquely named temporary file in the same folder (two writers do not
+    share one), flushed to disk, then renamed over the target: the rename is
+    atomic on every platform Python supports.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def default_home() -> Path:
@@ -196,7 +220,8 @@ class ProjectStore:
         current = directory / "project.json"
         self._archive(directory / destination, current.read_text(encoding="utf-8"))
         latest = pile[-1]
-        current.write_text(latest.read_text(encoding="utf-8"), encoding="utf-8")
+        # Through a temporary file: a crash here must not leave half a project.
+        self._atomic_write(current, latest.read_text(encoding="utf-8"))
         latest.unlink()
         return self.load(project_id)
 
@@ -212,7 +237,8 @@ class ProjectStore:
 
     def _archive(self, folder: Path, content: str) -> None:
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{time.time_ns()}.json").write_text(content, encoding="utf-8")
+        # Atomic as well: `diff --since` and undo read these snapshots back.
+        self._atomic_write(folder / f"{time.time_ns()}.json", content)
         files = sorted(folder.glob("*.json"))
         while len(files) > _HISTORY_LIMIT:
             files.pop(0).unlink()
@@ -241,10 +267,8 @@ class ProjectStore:
             return
         folder = directory / "branches"
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{name}.json").write_text(body, encoding="utf-8")
+        atomic_write_text(folder / f"{name}.json", body)
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(content, encoding="utf-8")
-        temporary.replace(path)
+        atomic_write_text(path, content)

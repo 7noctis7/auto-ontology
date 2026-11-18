@@ -113,7 +113,10 @@ def main(argv: list[str] | None = None) -> int:
     import_parser = commands.add_parser(
         "import", help="Extrait plusieurs fichiers dans le projet courant."
     )
-    import_parser.add_argument("paths", nargs="+")
+    import_parser.add_argument("paths", nargs="*")
+    import_parser.add_argument(
+        "--paste", action="store_true", help="Importe aussi le texte du presse-papiers."
+    )
     import_parser.add_argument("--home", default=None)
     import_parser.add_argument("--fake", action="store_true")
     ask_parser = commands.add_parser(
@@ -137,6 +140,23 @@ def main(argv: list[str] | None = None) -> int:
     open_parser.add_argument(
         "--fake", action="store_true", help="Sans modèle (démonstration)."
     )
+    brief_parser = commands.add_parser(
+        "brief",
+        help="Nouveautés et points à vérifier depuis une date (24h par défaut).",
+    )
+    brief_parser.add_argument(
+        "--since", default="24h", help="24h, 7d, 2w, today, 2026-11-01…"
+    )
+    brief_parser.add_argument("--json", action="store_true")
+    brief_parser.add_argument("--home", default=None)
+    diff_parser = commands.add_parser(
+        "diff", help="Classes, faits et attributs ajoutés ou retirés depuis une date."
+    )
+    diff_parser.add_argument(
+        "--since", default="7d", help="24h, 7d, 2w, today, 2026-11-01…"
+    )
+    diff_parser.add_argument("--json", action="store_true")
+    diff_parser.add_argument("--home", default=None)
     tables_parser = commands.add_parser(
         "tables", help="Liste les tables du projet courant (colonnes, types, exemples)."
     )
@@ -168,10 +188,30 @@ def main(argv: list[str] | None = None) -> int:
             watch=args.watch,
         )
     elif args.command == "import":
+        pasted = None
+        if args.paste:
+            from auto_ontology.text_ontology.daily import ClipboardError, read_clipboard
+
+            try:
+                pasted = read_clipboard()
+            except ClipboardError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
+        if not args.paths and pasted is None:
+            print("error: indiquez des fichiers ou --paste.", file=sys.stderr)
+            return 2
         import_paths(
             [Path(path) for path in args.paths],
             home=Path(args.home) if args.home else None,
             fake=args.fake,
+            pasted=pasted,
+        )
+    elif args.command in ("brief", "diff"):
+        return daily_report(
+            args.command,
+            since=args.since,
+            as_json=args.json,
+            home=Path(args.home) if args.home else None,
         )
     elif args.command == "ask":
         print(ask_project(args.question, home=Path(args.home) if args.home else None))
@@ -198,6 +238,29 @@ def main(argv: list[str] | None = None) -> int:
             home=Path(args.home) if args.home else None,
             fake=args.fake,
         )
+    return 0
+
+
+def daily_report(kind: str, *, since: str, as_json: bool, home: Path | None) -> int:
+    """``ontology brief`` and ``ontology diff`` on the current project."""
+    from auto_ontology.text_ontology.daily import as_json as to_json
+    from auto_ontology.text_ontology.daily import brief, diff, parse_since
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    store, project = found
+    try:
+        moment = parse_since(since)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    report = (
+        brief(project, moment)  # type: ignore[arg-type]
+        if kind == "brief"
+        else diff(project, store.project_dir(project.id), moment)  # type: ignore[arg-type, attr-defined]
+    )
+    sys.stdout.write(to_json(report.as_dict()) if as_json else report.markdown())
     return 0
 
 
@@ -290,7 +353,9 @@ def open_folder(
     return 0
 
 
-def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
+def import_paths(
+    paths: list[Path], *, home: Path | None, fake: bool, pasted: str | None = None
+) -> None:
     """Extract each file into the current project. Same pipeline as the page."""
     from auto_ontology.text_ontology.documents import load_bytes
     from auto_ontology.text_ontology.llm_settings import (
@@ -312,14 +377,25 @@ def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
             # A spreadsheet becomes a table: no model needed.
             for record in import_tabular(store, project, path.name, path.read_bytes()):
                 print(f"{path.name} → table {record.table} ({record.rows} lignes)")
-    if not documents:
+    if not documents and pasted is None:
         return
     config = resolve_llm_config(store)
     llm = FakeLLM() if fake else build_llm(config)
     label = "démonstration" if fake else model_label(llm, config)
-    for path in documents:
+    from datetime import datetime
+
+    from auto_ontology.text_ontology.documents import load_text
+
+    sources = [
+        (path.name, lambda path=path: load_bytes(path.name, path.read_bytes()))
+        for path in documents
+    ]
+    if pasted is not None:
+        name = f"presse-papiers {datetime.now():%Y-%m-%d %H%M}.txt"
+        sources.append((name, lambda: load_text(name, pasted)))
+    for name, read in sources:
         project = store.load(project.id)
-        loaded = load_bytes(path.name, path.read_bytes())
+        loaded = read()
         ingest_document(
             store,
             project,
@@ -334,7 +410,7 @@ def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
             on_event=lambda _event: None,
         )
         project = store.load(project.id)
-        print(f"{path.name} → {project.name} ({len(project.ontology.triplets)} faits)")
+        print(f"{name} → {project.name} ({len(project.ontology.triplets)} faits)")
 
 
 def write_sdk(destination: Path, *, home: Path | None) -> None:
