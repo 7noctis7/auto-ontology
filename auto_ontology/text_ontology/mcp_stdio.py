@@ -20,6 +20,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from auto_ontology.text_ontology.actions import preview_action
+from auto_ontology.text_ontology.lineage import lineage_for
 from auto_ontology.text_ontology.query import (
     answer,
     concepts,
@@ -57,6 +59,28 @@ _TOOLS = (
         "name": "facts",
         "description": "Triplets with the passage they came from.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "lineage",
+        "description": "Document, chunk and quote for one name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "preview_action",
+        "description": "Preview a rename or a merge. Does not write.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "source": {"type": "string"},
+                "target": {"type": "string"},
+            },
+            "required": ["name"],
+        },
     },
     {
         "name": "ask",
@@ -127,6 +151,18 @@ def _call(store: ProjectStore, params: dict[str, Any]) -> dict[str, Any]:
         "neighbours": lambda: neighbours(project, str(arguments.get("name") or "")),
         "facts": lambda: list_facts(project),
         "ask": lambda: answer(project, str(arguments.get("question") or "")),
+        "lineage": lambda: lineage_for(project, str(arguments.get("name") or "")),
+        "preview_action": lambda: preview_action(
+            project,
+            str(arguments.get("name") or "merge"),
+            {
+                "source": str(arguments.get("source") or ""),
+                "target": str(arguments.get("target") or ""),
+                "old": str(arguments.get("source") or ""),
+                "new": str(arguments.get("target") or ""),
+                "kind": "entity",
+            },
+        ),
     }
     if name not in tools:
         return _text(f"Outil inconnu : {name}")

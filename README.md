@@ -88,9 +88,19 @@ uv run ontology mcp
 uv run ontology serve --watch ~/Documents/a-lire --fake
 ```
 
-`ontology mcp` speaks MCP on standard input and only reads the current project.
-What is not in this pass: OCR for scanned PDFs, and writing the result back
-into the Postgres catalog. Details: [docs/text-ontology.md](docs/text-ontology.md).
+The Schema and Explorer tabs separate types from instances. Corrections are
+actions with a preview and a log. A branch is a JSON copy: merge it or discard
+it. `ontology sdk --out client.py` writes a small Python client.
+`/api/tester` tries a typed search. Off this machine, set `ONTOLOGY_API_TOKEN`;
+writes also need `ONTOLOGY_API_ALLOW_WRITE=1`.
+
+`ontology mcp` speaks MCP on standard input. It can read and preview an
+action. Applying a change from a remote client needs the write flag.
+A textless PDF is flagged as a scan. If Tesseract is on the PATH the page says
+so; the binary is not launched. Neighbour search uses local character
+trigrams, and a candidate is never merged on its own. Writing the result back
+into the Postgres catalog is still out of this pass. Details:
+[docs/text-ontology.md](docs/text-ontology.md).
 
 ## Benchmarks
 

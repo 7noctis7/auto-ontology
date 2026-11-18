@@ -25,7 +25,17 @@
       ["Exporter", "Télécharger : HTML autonome, Mermaid, Turtle (RDF), Cypher (Neo4j), CSV, JSON-LD, JSONL. Le JSONL est un jeu de triplets validés pour un entraînement ultérieur, que cette application ne lance pas."],
       ["Le modèle", "Sans clé, l'exemple fonctionne et la page le dit. ONTOLOGY_LLM_API_KEY, ONTOLOGY_LLM_ENDPOINT et ONTOLOGY_LLM_MODEL visent un serveur compatible OpenAI. Le défaut reste NVIDIA. ontology serve --fake n'appelle aucun modèle."],
       ["Ce qu'apprendre veut dire", "Rien n'est réentraîné. Vos corrections (alias, faits refusés, types) sont écrites dans le projet et dans ~/AutoOntology/memory.json, puis ajoutées au prompt suivant. Le score du jeu d'or mesure l'exemple de la bibliothèque. Un vrai affinage est une étape possible plus tard, à partir du JSONL."],
-      ["Cas", "Un dossier de contrats : types, parties, clauses partagées. Un lot d'articles : auteurs et concepts communs. Des notes de réunion : qui décide quoi, puis une question dans le panneau, avec le passage cité."]
+      ["Cas", "Un dossier de contrats : types, parties, clauses partagées. Un lot d'articles : auteurs et concepts communs. Des notes de réunion : qui décide quoi, puis une question dans le panneau, avec le passage cité."],
+      ["Fiche", "Un clic ouvre la fiche : type, groupe, statut, propriétés typées, liens, citation. Les corrections se font là, avec annulation."],
+      ["Actions", "Renommer, fusionner, changer le type, retirer un fait, éditer une propriété, changer un statut. Chaque action a un aperçu, puis une ligne de journal. Le journal alimente le prompt suivant."],
+      ["Lignée", "Document, morceau, citation, fait, puis les actions qui ont suivi. Depuis un document, la liste de ce qu'il a encore produit."],
+      ["Schéma", "L'onglet Schéma sépare les types, les propriétés et les liens des instances. Un type nouveau reste expérimental tant que vous ne le marquez pas actif."],
+      ["Explorer", "Recherche à facettes, puis « Enregistrer ». L'ensemble s'applique au graphe et s'exporte. L'adresse de la page reprend la recherche."],
+      ["Voisinage", "Depuis une fiche, profondeur 1 à 3, sens et types de liens. Le dessin s'arrête à 500 nœuds et le dit. Une note en pointillés n'est pas un fait exporté."],
+      ["Pipeline", "Lecture, nettoyage, morceaux, extraction, normalisation, fusion. Des attentes (échecs, citations, cycles) marquent le document incomplet sans effacer le reste. Un PDF sans texte prévient si Tesseract est absent."],
+      ["API et client", "/docs décrit l'API. /api/tester interroge un type. ontology sdk écrit un client Python. Hors de cette machine, le jeton est requis et l'écriture reste coupée sans ONTOLOGY_API_ALLOW_WRITE=1."],
+      ["Branches", "Une branche est une copie du projet. On y essaie une extraction ou des fusions, on compare, on fusionne vers main ou on jette. Jeter ne modifie pas main."],
+      ["Similarité", "Un index local (trigrammes, pas un modèle téléchargé) propose des candidats de fusion et une recherche par phrase. Rien n'est fusionné tout seul."]
     ],
     en: [
       ["An ontology, in two lines", "The vocabulary of the corpus: concepts, individuals, and the facts that link them. The graph shows the facts; the glossary gives the words a meaning."],
@@ -36,7 +46,17 @@
       ["Export", "Download: standalone HTML, Mermaid, Turtle (RDF), Cypher (Neo4j), CSV, JSON-LD, JSONL. JSONL is a set of validated triplets for a later training run. This app does not train a model."],
       ["The model", "With no key, the sample still works and the page says so. ONTOLOGY_LLM_API_KEY, ONTOLOGY_LLM_ENDPOINT and ONTOLOGY_LLM_MODEL point at an OpenAI-compatible server. The default stays NVIDIA. ontology serve --fake calls no model."],
       ["What learning means", "Nothing is fine-tuned. Corrections (aliases, rejected facts, types) are stored in the project and in ~/AutoOntology/memory.json, then added to the next prompt. The gold score measures the library example. Real fine-tuning is a possible later step, from the JSONL file."],
-      ["Uses", "A folder of contracts: types, parties, shared clauses. A batch of papers: authors and shared concepts. Meeting notes: who decides what, then a question in the side panel, with the cited passage."]
+      ["Uses", "A folder of contracts: types, parties, shared clauses. A batch of papers: authors and shared concepts. Meeting notes: who decides what, then a question in the side panel, with the cited passage."],
+      ["Card", "A click opens the card: type, group, status, typed properties, links, citation. Corrections happen there, and can be undone."],
+      ["Actions", "Rename, merge, change type, reject a fact, edit a property, set a status. Each action has a preview, then a log line. The log feeds the next prompt."],
+      ["Lineage", "Document, chunk, citation, fact, then the actions that followed. From a document, what it still produced."],
+      ["Schema", "The Schema tab separates types, properties and links from instances. A new type stays experimental until you mark it active."],
+      ["Explorer", "Faceted search, then Save. The set applies to the graph and exports. The page address keeps the search."],
+      ["Neighbourhood", "From a card, depth 1 to 3, direction and link types. Drawing stops at 500 nodes and says so. A dashed note is not an exported fact."],
+      ["Pipeline", "Read, clean, chunk, extract, normalize, merge. Expectations (failures, citations, cycles) mark the document incomplete without deleting the rest. A textless PDF warns when Tesseract is missing."],
+      ["API and client", "/docs describes the API. /api/tester queries a type. ontology sdk writes a Python client. Off this machine the token is required, and writes stay off without ONTOLOGY_API_ALLOW_WRITE=1."],
+      ["Branches", "A branch is a copy of the project. Try an extraction or some merges, compare, merge into main, or discard. Discard does not change main."],
+      ["Similarity", "A local index (trigrams, not a downloaded model) suggests merge candidates and a phrase search. Nothing is merged on its own."]
     ]
   };
 
@@ -99,6 +119,10 @@
           " · " + (doc.genre_source === "user" ? (lang() === "fr" ? "corrigé" : "corrected") : (lang() === "fr" ? "estimé" : "estimated"))
         ]),
         select,
+        (doc.steps || []).length ? el("p", { class: "muted" }, [(doc.steps || []).map(function (step) { return step.name; }).join(" → ")]) : null,
+        (doc.expectations || []).some(function (step) { return step.status === "failed"; })
+          ? el("p", { class: "bad" }, [(doc.expectations || []).filter(function (step) { return step.status === "failed"; }).map(function (step) { return step.detail; }).join(" ")])
+          : null,
         el("div", { class: "paste-actions" }, [
           el("button", { type: "button", onclick: function () { showOnGraph({ kind: "document", value: doc.id }); } }, [lang() === "fr" ? "Voir dans le graphe" : "Show on the graph"]),
           el("button", { type: "button", onclick: function () { showOnGraph({ kind: "genre", value: doc.genre }); } }, [genreLabel(doc.genre)])

@@ -218,9 +218,11 @@ def _pdf_text(data: bytes) -> tuple[str, list[str], int]:
         raise DocumentReadError(f"Ce PDF n'a pas pu être ouvert : {exc}") from exc
     text = "\n\n".join(pages)
     if page_count and len(text.strip()) < 40:
+        from auto_ontology.text_ontology.quality import ocr_hint
+
         warnings.append(
-            "Ce PDF ne contient presque pas de texte. C'est probablement un scan : "
-            "un OCR serait nécessaire, et cette application ne l'inclut pas."
+            "Ce PDF ne contient presque pas de texte. C'est probablement un scan."
+            + ocr_hint()
         )
     return text, warnings, page_count
 

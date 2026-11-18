@@ -108,6 +108,11 @@ def main(argv: list[str] | None = None) -> int:
         "mcp", help="Serveur MCP sur l'entrée standard, en lecture seule."
     )
     mcp_parser.add_argument("--home", default=None)
+    sdk_parser = commands.add_parser(
+        "sdk", help="Écrit un client Python à partir du schéma du projet courant."
+    )
+    sdk_parser.add_argument("--home", default=None)
+    sdk_parser.add_argument("--out", default="ontologie_client.py")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if args.command == "serve":
         serve(
@@ -130,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         from auto_ontology.text_ontology.mcp_stdio import serve_mcp
 
         serve_mcp(Path(args.home) if args.home else None)
+    elif args.command == "sdk":
+        write_sdk(Path(args.out), home=Path(args.home) if args.home else None)
     return 0
 
 
@@ -167,6 +174,30 @@ def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
         )
         project = store.load(project.id)
         print(f"{path.name} → {project.name} ({len(project.ontology.triplets)} faits)")
+
+
+def write_sdk(destination: Path, *, home: Path | None) -> None:
+    """Write a generated client next to the path the person gave."""
+    from auto_ontology.text_ontology.schema_layer import sync_schema
+    from auto_ontology.text_ontology.sdkgen import render_sdk
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(home or default_home())
+    settings = store.settings()
+    project = None
+    if settings.last_project_id:
+        try:
+            project = store.load(settings.last_project_id)
+        except (FileNotFoundError, ValueError):
+            project = None
+    if project is None:
+        projects = store.list_projects()
+        project = projects[0] if projects else None
+    if project is None:
+        raise SystemExit("Aucun projet.")
+    sync_schema(project)
+    destination.write_text(render_sdk(project), encoding="utf-8")
+    print(destination)
 
 
 def ask_project(question: str, *, home: Path | None) -> str:

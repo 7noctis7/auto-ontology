@@ -272,7 +272,7 @@
     empty.hidden = hasContent();
     var showGraph = viewName === "graph";
     var panel = document.getElementById("panel-view");
-    var panelViews = { documents: 1, analysis: 1, dashboards: 1, guide: 1 };
+    var panelViews = { documents: 1, analysis: 1, dashboards: 1, guide: 1, schema: 1, explorer: 1 };
     graphWrap.hidden = !showGraph;
     table.hidden = !(viewName === "glossary" || viewName === "facts");
     tree.hidden = viewName !== "hierarchy";
@@ -394,6 +394,12 @@
       nodes.forEach(function (node) {
         if (node.scope === filter.value) allowed[node.id] = true;
       });
+    } else if (filter && filter.kind === "ids") {
+      allowed = {};
+      var wanted = filter.value || [];
+      nodes.forEach(function (node) {
+        if (wanted.indexOf(node.id) >= 0 || wanted.indexOf(node.label) >= 0) allowed[node.id] = true;
+      });
     }
     if (allowed) {
       nodes = nodes.filter(function (node) { return allowed[node.id]; });
@@ -471,9 +477,9 @@
         id: edge.id, from: edge.from, to: edge.to,
         label: edge.kind === "type" ? "" : edge.label,
         arrows: "to",
-        dashes: edge.kind === "hierarchy" || edge.kind === "type",
+        dashes: edge.kind === "hierarchy" || edge.kind === "type" || edge.kind === "note",
         width: edge.kind === "relation" ? Math.min(6, 1 + Math.sqrt(edge.support || 1)) : 1,
-        color: { color: dim ? "#e1e6ee" : "#5c6b80" },
+        color: { color: dim ? "#e1e6ee" : (edge.kind === "note" ? "#e69f00" : "#5c6b80") },
         font: { color: "#3e4a5c", strokeWidth: 0, size: 11, align: "middle" }
       };
     });
@@ -773,9 +779,21 @@
     var wrap = el("div", {}, [
       el("p", { class: "crumb" }, [crumb]),
       el("h2", {}, [node.label]),
-      el("p", { class: "kind-tag" }, [t(node.kind) || node.kind, node.orphan ? " · " + t("orphans") : ""])
+      el("p", { class: "kind-tag" }, [
+        (t(node.kind) || node.kind),
+        node.group ? " · " + node.group : "",
+        node.status ? " · " + node.status : "",
+        node.orphan ? " · " + t("orphans") : ""
+      ])
     ]);
     wrap.append(el("button", { type: "button", onclick: function () { selected = null; renderGraph(); renderSide(); } }, ["←"]));
+    var props = (node.typed_properties || []).filter(function (item) { return item.visibility !== "hidden"; });
+    if (props.length) {
+      wrap.append(el("h3", {}, [lang === "fr" ? "Propriétés" : "Properties"]));
+      props.forEach(function (item) {
+        wrap.append(el("p", {}, [item.key + " · " + item.base_type + " · " + item.value]));
+      });
+    }
     var nameField = el("input", { type: "text", value: node.label });
     nameField.addEventListener("change", function () {
       if (nameField.value.trim() && nameField.value !== node.label) {

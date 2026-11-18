@@ -40,13 +40,20 @@ from auto_ontology.text_ontology.models import TextOntology
 from auto_ontology.text_ontology.mutations import absorb_provenance
 from auto_ontology.text_ontology.normalize import normalize_ontology
 from auto_ontology.text_ontology.provenance import RawChunk, resolve_provenance
+from auto_ontology.text_ontology.quality import apply_expectations
 from auto_ontology.text_ontology.sample import (
     SAMPLE_MODEL,
     SAMPLE_TEXT,
     sample_ontology,
 )
 from auto_ontology.text_ontology.store import ProjectStore, now_iso
-from auto_ontology.text_ontology.studio_models import DocumentRecord, Project
+from auto_ontology.text_ontology.schema_layer import sync_schema
+from auto_ontology.text_ontology.studio_models import (
+    ChunkNote,
+    DocumentRecord,
+    Project,
+    StepNote,
+)
 
 
 class IngestError(Exception):
@@ -162,6 +169,18 @@ def ingest_document(
         if durations and event.status != "started":
             average = sum(durations) / len(durations)
             eta = round(average * max(0, event.total - event.index))
+        if event.status in {"ok", "cached", "failed"}:
+            document.chunk_notes = [
+                note for note in document.chunk_notes if note.index != event.index
+            ]
+            document.chunk_notes.append(
+                ChunkNote(
+                    index=event.index,
+                    status=event.status,
+                    preview=" ".join(event.text.split())[:240],
+                    model=model_label,
+                )
+            )
         if event.status in {"ok", "cached"} and event.ontology is not None:
             if event.status == "cached":
                 cached_indexes.append(event.index)
@@ -228,6 +247,20 @@ def ingest_document(
         document.status = "incomplete"
     else:
         document.status = "ok"
+    document.steps = [
+        StepNote(name="ingest", status="ok", detail=loaded.filename),
+        StepNote(name="clean", status="ok", detail=f"{len(loaded.text)} caractères"),
+        StepNote(name="chunk", status="ok", detail=str(result.chunks)),
+        StepNote(
+            name="extract",
+            status="incomplete" if result.failed_chunks else "ok",
+            detail=model_label,
+        ),
+        StepNote(name="normalize", status="ok"),
+        StepNote(name="merge", status=document.status),
+    ]
+    sync_schema(project)
+    apply_expectations(project, document.id)
     point = record_score(project, loaded.text)
     home_memory = store.load_memory()
     home_memory.scores.append(point)

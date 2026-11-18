@@ -83,7 +83,14 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-radius: 6px;
   padding: 5px 10px;
 }
-.views button.is-on { background: var(--ink); color: white; border-color: var(--ink); }
+.views button.is-on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.panel-view button, .doc-card button, #side button, #branch-bar button {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
 #search {
   flex: 1;
   min-width: 160px;

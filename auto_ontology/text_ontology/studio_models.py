@@ -76,6 +76,98 @@ class DocumentRecord(BaseModel):
     genre_source: str = "auto"
     domain: str = ""
     domain_confidence: float = 0
+    steps: list["StepNote"] = Field(default_factory=list)
+    expectations: list["StepNote"] = Field(default_factory=list)
+    chunk_notes: list["ChunkNote"] = Field(default_factory=list)
+
+
+class StepNote(BaseModel):
+    """One pipeline step or one quality check."""
+
+    name: str
+    status: str = "ok"
+    detail: str = ""
+
+
+class ChunkNote(BaseModel):
+    """A chunk the extractor actually saw, kept short for the lineage view."""
+
+    index: int
+    status: str = "ok"
+    preview: str = ""
+    model: str = ""
+
+
+class PropertyDef(BaseModel):
+    """A typed characteristic. ``shared`` reuses a canonical name when it matches."""
+
+    id: str
+    label: str
+    base_type: str = "string"
+    visibility: str = "normal"
+    shared: str = ""
+
+
+class ObjectTypeDef(BaseModel):
+    """The schema of a class, distinct from the instances extracted from text."""
+
+    id: str
+    label: str
+    description: str = ""
+    group: str = "Concepts"
+    status: str = "experimental"
+    title_key: str = "nom"
+
+
+class LinkTypeDef(BaseModel):
+    """The schema of a predicate."""
+
+    id: str
+    label: str
+    inverse: str = ""
+    source_type: str = ""
+    target_type: str = ""
+    cardinality: str = "n-n"
+    status: str = "experimental"
+
+
+class SchemaCatalog(BaseModel):
+    """Types, properties and links of one project. Instances stay on the ontology."""
+
+    version: int = 1
+    object_types: list[ObjectTypeDef] = Field(default_factory=list)
+    properties: list[PropertyDef] = Field(default_factory=list)
+    link_types: list[LinkTypeDef] = Field(default_factory=list)
+
+
+class ActionEntry(BaseModel):
+    """One applied correction. The log is append-only in the project file."""
+
+    id: str
+    at: str
+    actor: str = "local"
+    name: str
+    params: dict[str, str] = Field(default_factory=dict)
+    summary: str = ""
+
+
+class ObjectSetDef(BaseModel):
+    """A named filter. ``query`` is the definition; ``pinned_ids`` is optional."""
+
+    id: str
+    name: str
+    description: str = ""
+    query: dict[str, str] = Field(default_factory=dict)
+    pinned_ids: list[str] = Field(default_factory=list)
+
+
+class NoteLink(BaseModel):
+    """A local remark. It is not a sourced fact and stays out of RDF exports."""
+
+    id: str
+    source: str
+    target: str
+    label: str = "note"
 
 
 class Alias(BaseModel):
@@ -137,6 +229,10 @@ class Project(BaseModel):
     classes: list[ClassProv] = Field(default_factory=list)
     memory: Memory = Field(default_factory=Memory)
     pinned_dashboards: list[str] = Field(default_factory=list)
+    catalog: SchemaCatalog = Field(default_factory=SchemaCatalog)
+    action_log: list[ActionEntry] = Field(default_factory=list)
+    object_sets: list[ObjectSetDef] = Field(default_factory=list)
+    notes: list[NoteLink] = Field(default_factory=list)
 
 
 class StudioSettings(BaseModel):

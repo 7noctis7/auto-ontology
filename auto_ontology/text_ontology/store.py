@@ -125,7 +125,9 @@ class ProjectStore:
             self._archive(directory / "history", target.read_text(encoding="utf-8"))
             self._clear(directory / "redo")
         project.updated_at = now_iso()
-        self._atomic_write(target, project.model_dump_json(indent=2) + "\n")
+        body = project.model_dump_json(indent=2) + "\n"
+        self._atomic_write(target, body)
+        self._mirror_branch(directory, body)
 
     def can_undo(self, project_id: str) -> bool:
         return any(self._history(project_id).glob("*.json"))
@@ -190,6 +192,25 @@ class ProjectStore:
             return
         for file in folder.glob("*.json"):
             file.unlink()
+
+    @staticmethod
+    def _mirror_branch(directory: Path, body: str) -> None:
+        """Keep the active branch file aligned with ``project.json``."""
+        name = "main"
+        pointer = directory / "branch.json"
+        if pointer.is_file():
+            try:
+                name = str(
+                    json.loads(pointer.read_text(encoding="utf-8")).get("active")
+                    or "main"
+                )
+            except (OSError, ValueError):
+                name = "main"
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", name):
+            return
+        folder = directory / "branches"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.json").write_text(body, encoding="utf-8")
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

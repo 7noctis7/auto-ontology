@@ -28,7 +28,8 @@ model. The page also types each document, offers a guide, proposed
 dashboards, and a read API at `/docs`. Corrections are reused in the next
 prompt; they do not train a model. `ontology import`, `ontology ask` and
 `ontology mcp` script the same project. The CLI below remains the way to
-script one extraction.
+script one extraction. The page also keeps a schema, saved sets, a lineage
+chain, project branches, and `ontology sdk` for a generated Python client.
 
 ## Output
 
