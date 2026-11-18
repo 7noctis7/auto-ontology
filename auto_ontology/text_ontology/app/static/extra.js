@@ -167,6 +167,13 @@
     root.append(el("h3", {}, [lang() === "fr" ? "Relations les plus fréquentes" : "Most frequent relations"]));
     root.append(bars((state.stats && state.stats.top_predicates) || []));
     var matrix = data.matrix || { labels: [], rows: [] };
+    if (matrix.truncated) {
+      root.append(el("p", { class: "muted" }, [
+        lang() === "fr"
+          ? "Matrice limitée aux " + matrix.truncated.shown + " classes les plus reliées sur " + matrix.truncated.total + "."
+          : "Matrix limited to the " + matrix.truncated.shown + " most connected classes of " + matrix.truncated.total + "."
+      ]));
+    }
     if ((matrix.labels || []).length) {
       root.append(el("h3", {}, [lang() === "fr" ? "Relations entre classes" : "Relations between classes"]));
       root.append(matrixTable(matrix));

@@ -384,3 +384,9 @@ body.is-dropping .drop-overlay { display: flex; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
 }
+
+.graph-note {
+  position: absolute; left: 12px; top: 12px; margin: 0; max-width: calc(100% - 24px);
+  padding: 6px 10px; border-radius: 6px; font-size: 12px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+}

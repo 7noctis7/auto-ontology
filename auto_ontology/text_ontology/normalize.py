@@ -92,6 +92,16 @@ def _words(text: str) -> list[str]:
     return words
 
 
+def split_words(text: str) -> list[str]:
+    """*text* split on separators and camelCase boundaries (``ServeurGPU`` -> 2)."""
+    return _words(text)
+
+
+def entity_key(name: str) -> str:
+    """How normalization tells two spellings of one individual apart, or not."""
+    return _entity_key(name)
+
+
 def to_pascal_case(name: str) -> str:
     """``"document technique"`` → ``DocumentTechnique``; ``"ProjetIA"`` stays.
 

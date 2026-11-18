@@ -198,7 +198,8 @@ def test_extract_grows_a_base_ontology_and_reuses_its_names() -> None:
 
     message = llm.calls[0][1].content
     assert "- Classes : Personne, Entreprise" in message
-    assert "- Entités : Alice, ACME" in message
+    # ACME is named in this chunk, so it comes before Alice.
+    assert "- Entités : ACME, Alice" in message
     ontology = result.ontology
     assert [c.name for c in ontology.classes] == ["Personne", "Entreprise"]
     assert [(t.subject, t.object) for t in ontology.triplets] == [
@@ -253,6 +254,7 @@ def test_route_returns_the_ontology_envelope(monkeypatch: pytest.MonkeyPatch) ->
         "base": None,
         "skip_failed_chunks": False,
         "clean": False,
+        "lang": "auto",
     }
 
 
@@ -386,3 +388,88 @@ def test_extract_passes_the_answer_budget_to_the_client(
     extract_text_ontology("Un texte.", max_tokens=2048)
 
     assert seen == {"temperature": 0.0, "max_tokens": 2048}
+
+
+def test_previous_tail_keeps_whole_last_sentences() -> None:
+    from auto_ontology.text_ontology.extractor import previous_tail
+
+    chunk = "Première phrase assez longue. Deuxième phrase. Troisième phrase."
+
+    assert previous_tail(chunk, 40) == "Deuxième phrase. Troisième phrase."
+    assert previous_tail(chunk, 0) == ""
+    assert len(previous_tail("x" * 50 + " fin du mot", 12)) <= 12
+
+
+def test_each_chunk_sees_the_end_of_the_previous_one() -> None:
+    llm = _FakeLLM([{}, {}])
+    text = "Alice dirige ACME depuis 2019.\n\nElle a fondé la filiale de Lyon."
+
+    extract_text_ontology(text, max_chunk_chars=35, llm=llm)
+
+    first, second = (call[1].content for call in llm.calls)
+    assert "<contexte_precedent>" not in first
+    assert (
+        "<contexte_precedent>\nAlice dirige ACME depuis 2019.\n</contexte_precedent>"
+        in second
+    )
+    assert second.index("</contexte_precedent>") < second.index("<texte_source>")
+
+
+def test_overlap_can_be_turned_off() -> None:
+    llm = _FakeLLM([{}, {}])
+    text = "Alice dirige ACME depuis 2019.\n\nElle a fondé la filiale de Lyon."
+
+    extract_text_ontology(text, max_chunk_chars=35, overlap_chars=0, llm=llm)
+
+    assert "<contexte_precedent>" not in llm.calls[1][1].content
+
+
+@pytest.mark.parametrize(
+    ("lang", "expected"),
+    [("auto", "garde leur langue"), ("fr", "en français"), ("en", "en anglais")],
+)
+def test_the_message_states_the_language_and_the_est_un_rule(
+    lang: str, expected: str
+) -> None:
+    message = build_user_message("Texte.", index=1, total=1, lang=lang)
+
+    assert expected in message
+    assert "est_un relie uniquement deux classes" in message
+
+
+def test_a_name_the_chunk_mentions_survives_the_name_cap() -> None:
+    from auto_ontology.text_ontology.extractor import _ReuseContext
+
+    context = _ReuseContext([f"Classe{i}" for i in range(300)] + ["ServeurGPU"])
+    context.add(
+        TextOntology.model_validate(
+            {
+                "triplets": [
+                    {
+                        "subject": "Société Générale",
+                        "subject_type": "Banques",
+                        "predicate": "Emploie",
+                        "object": "alice",
+                        "object_type": "Personne",
+                    },
+                    {
+                        "subject": "SOCIETE GENERALE",
+                        "subject_type": "banques",
+                        "predicate": "emploie",
+                        "object": "Alice",
+                        "object_type": "personne",
+                    },
+                ]
+            }
+        )
+    )
+
+    classes, predicates, entities = context.for_chunk(
+        "Les serveurs GPU de la banque sont neufs."
+    )
+
+    # Mentioned names lead, so they fall inside the 200 names restated.
+    assert classes[:2] == ["ServeurGPU", "Banques"]
+    assert predicates == ["emploie"]
+    # Case and accent variants count once, first spelling kept.
+    assert entities == ["Société Générale", "alice"]

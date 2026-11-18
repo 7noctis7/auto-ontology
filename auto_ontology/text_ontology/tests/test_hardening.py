@@ -319,3 +319,33 @@ def test_an_empty_studio_lists_no_branches_without_an_error(tmp_path: Path) -> N
 
     assert response.status_code == 200
     assert response.json() == {"active": "main", "branches": []}
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/v1/documents/x/genre", {"genre": "paper"}),
+        ("/api/dashboards/pin", {"id": "x", "pinned": True}),
+        ("/api/v1/object-sets", {"name": "s", "type_name": "Personne"}),
+        ("/api/v1/actions/rename/apply", {"params": {}}),
+        ("/api/v1/branches", {"name": "essai"}),
+        ("/api/v1/branches/essai/checkout", None),
+        ("/api/v1/branches/merge", None),
+        ("/api/v1/branches/discard", None),
+        ("/api/v1/notes", {"source": "a", "target": "b", "label": "n"}),
+    ],
+)
+def test_api_writes_wait_for_a_running_extraction(
+    tmp_path: Path, path: str, body: dict[str, Any] | None
+) -> None:
+    """The extraction's final save would erase a change made meanwhile."""
+    client = _client(tmp_path)
+    assert client.post("/api/sample").status_code == 200
+    client.app.state.studio.running = True  # type: ignore[attr-defined]
+
+    response = client.post(path, json=body) if body is not None else client.post(path)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"] == "busy"
+    # Reads still work while the extraction runs.
+    assert client.get("/api/v1/concepts").status_code == 200

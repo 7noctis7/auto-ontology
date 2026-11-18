@@ -257,6 +257,8 @@ def test_cli_passes_provider_model_and_clean(
     }
     assert seen["clean"] is True
     assert isinstance(seen["backend"], _StubBackend)
+    assert seen["lang"] == "auto"
+    assert seen["overlap_chars"] == 600
 
 
 def test_cli_clean_previews_the_cleaned_text(
@@ -275,3 +277,103 @@ def test_cli_clean_previews_the_cleaned_text(
     assert code == 0
     assert out == "Alice works for ACME, a company that builds very reliable rockets.\n"
     assert "2 code lines" in err
+
+
+def _docx_bytes(paragraphs: list[str]) -> bytes:
+    import io
+
+    from docx import Document
+
+    document = Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def test_cli_reads_a_docx_and_an_html_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "note.docx").write_bytes(
+        _docx_bytes(["Alice dirige la bibliothèque municipale de Lyon depuis 2019."])
+    )
+    (tmp_path / "page.html").write_text(
+        "<html><body><h1>Titre</h1><p>Bob travaille pour ACME à Paris.</p>"
+        "<script>alert(1)</script></body></html>",
+        encoding="utf-8",
+    )
+
+    code, out, _ = _run(
+        ["clean", str(tmp_path / "note.docx"), str(tmp_path / "page.html")], capsys
+    )
+
+    assert code == 0
+    assert "Alice dirige la bibliothèque municipale de Lyon" in out
+    assert "Bob travaille pour ACME à Paris." in out
+    assert "alert(1)" not in out
+
+
+def test_cli_reports_an_unreadable_pdf_in_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "abime.pdf").write_bytes(b"%PDF-1.4\n\xff\xfe pas un vrai PDF")
+
+    code, out, err = _run(["clean", str(tmp_path / "abime.pdf")], capsys)
+
+    assert code == 1
+    assert out == ""
+    assert err.startswith("error: ") and "PDF" in err
+    assert "codec" not in err
+
+
+def test_cli_reads_a_latin1_text_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "ancien.txt").write_bytes(
+        "Le château de Versailles est situé en Île-de-France.".encode("cp1252")
+    )
+
+    code, out, _ = _run(["clean", str(tmp_path / "ancien.txt")], capsys)
+
+    assert code == 0
+    assert "château" in out and "Île-de-France" in out
+
+
+def _pdf_bytes(line: str) -> bytes:
+    """A minimal valid one-page PDF showing *line* (ASCII), offsets computed."""
+    stream = f"BT /F1 12 Tf 72 720 Td ({line}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n".encode()
+    out += f"startxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def test_cli_reads_a_pdf(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / "papier.pdf").write_bytes(
+        _pdf_bytes("Satoshi Nakamoto proposed a peer-to-peer electronic cash system.")
+    )
+
+    code, out, _ = _run(["clean", str(tmp_path / "papier.pdf")], capsys)
+
+    assert code == 0
+    assert "Satoshi Nakamoto proposed a peer-to-peer electronic cash system." in out

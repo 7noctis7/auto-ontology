@@ -206,6 +206,7 @@ def install_api(app: FastAPI) -> None:
         document_id: str, body: GenreBody, request: Request
     ) -> dict[str, Any]:
         """Correct a document type or domain by hand."""
+        _require_idle(request)
         from auto_ontology.text_ontology.app.server import _remember_edit, _view
         from auto_ontology.text_ontology.mutations import apply_edit
 
@@ -259,6 +260,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/dashboards/pin")
     def post_pin(body: PinBody, request: Request) -> dict[str, Any]:
         """Remember or forget one proposed dashboard."""
+        _require_idle(request)
         from auto_ontology.text_ontology.app.server import _view
 
         studio = request.app.state.studio
@@ -351,6 +353,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/object-sets")
     def post_set(body: SetBody, request: Request) -> dict[str, Any]:
         """Save a filter. It stores the definition, not a frozen list of ids."""
+        _require_idle(request)
         studio, project = _studio(request)
         project.object_sets.append(
             ObjectSetDef(
@@ -372,6 +375,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/actions/{name}/apply")
     def apply(name: str, body: ActionBody, request: Request) -> dict[str, Any]:
         """Apply an action. Remote callers need ONTOLOGY_API_ALLOW_WRITE=1."""
+        _require_idle(request)
         host = request.client.host if request.client else ""
         if not write_allowed(host):
             raise HTTPException(
@@ -435,6 +439,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/branches")
     def post_branch(body: BranchBody, request: Request) -> dict[str, Any]:
         """Copy the project into a new branch. Main is left as it is."""
+        _require_idle(request)
         studio, project = _studio(request)
         create_branch(studio.store, project, body.name)
         from auto_ontology.text_ontology.app.server import _view
@@ -451,6 +456,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/branches/{name}/checkout")
     def post_checkout(name: str, request: Request) -> dict[str, Any]:
         """Switch the working copy to *name*."""
+        _require_idle(request)
         studio, project = _studio(request)
         checkout(studio.store, project.id, name)
         from auto_ontology.text_ontology.app.server import _view
@@ -460,6 +466,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/branches/merge")
     def post_merge(request: Request) -> dict[str, Any]:
         """Union the open branch into main."""
+        _require_idle(request)
         studio, project = _studio(request)
         merge_branch(studio.store, project.id)
         from auto_ontology.text_ontology.app.server import _view
@@ -469,6 +476,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/branches/discard")
     def post_discard(request: Request) -> dict[str, Any]:
         """Drop the open side branch and reload main."""
+        _require_idle(request)
         studio, project = _studio(request)
         discard_branch(studio.store, project.id)
         from auto_ontology.text_ontology.app.server import _view
@@ -487,6 +495,7 @@ def install_api(app: FastAPI) -> None:
     @app.post("/api/v1/notes")
     def post_note(body: NoteBody, request: Request) -> dict[str, Any]:
         """A dashed remark. It is not exported as a sourced fact."""
+        _require_idle(request)
         studio, project = _studio(request)
         project.notes.append(
             NoteLink(
@@ -548,6 +557,13 @@ def _params(body: ActionBody) -> dict[str, str]:
 
 def _studio(request: Request) -> tuple[Any, Any]:
     return request.app.state.studio, _project(request)
+
+
+def _require_idle(request: Request) -> None:
+    """Refuse a write while an extraction runs: its final save would erase it."""
+    from auto_ontology.text_ontology.app.server import _ensure_idle
+
+    _ensure_idle(request.app.state.studio)
 
 
 def _project(request: Request) -> Any:

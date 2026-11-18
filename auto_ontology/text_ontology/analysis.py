@@ -25,20 +25,35 @@ def annotate_graph(
 ) -> None:
     """Set ``community`` and ``scope`` on each node. Communities are labels, not a layout."""
     labels = {str(node["id"]): index for index, node in enumerate(nodes)}
-    relation = [edge for edge in edges if edge.get("kind") != "type"]
-    for _round in range(6):
-        nxt = dict(labels)
-        for node in nodes:
-            votes: Counter[int] = Counter()
-            node_id = str(node["id"])
-            for edge in relation:
-                if edge["from"] == node_id and str(edge["to"]) in labels:
-                    votes[labels[str(edge["to"])]] += 1
-                elif edge["to"] == node_id and str(edge["from"]) in labels:
-                    votes[labels[str(edge["from"])]] += 1
-            if votes:
-                nxt[node_id] = votes.most_common(1)[0][0]
-        labels = nxt
+    # Each node's neighbours, built once: scanning every edge for every node
+    # made this quadratic (two minutes at 20,000 triplets).
+    neighbours: dict[str, list[str]] = {node_id: [] for node_id in labels}
+    for edge in edges:
+        if edge.get("kind") == "type":
+            continue
+        source, target = str(edge["from"]), str(edge["to"])
+        if source in labels and target in labels:
+            neighbours[source].append(target)
+            if target != source:
+                neighbours[target].append(source)
+    # Asynchronous label propagation: each node takes its neighbours' most
+    # common label in turn, ties going to the smallest label. Updating all
+    # nodes at once, as before, made a triangle swap labels forever instead
+    # of agreeing; this converges, and the result does not depend on chance.
+    for _round in range(10):
+        changed = False
+        for node_id, around in neighbours.items():
+            if not around:
+                continue
+            votes = Counter(labels[other] for other in around)
+            votes[labels[node_id]] += 0  # keeps the node's own label a candidate
+            best = max(votes.values())
+            choice = min(label for label, count in votes.items() if count == best)
+            if choice != labels[node_id]:
+                labels[node_id] = choice
+                changed = True
+        if not changed:
+            break
     compact: dict[int, int] = {}
     for node in nodes:
         raw = labels[str(node["id"])]
@@ -249,12 +264,22 @@ def dashboard_html(project: Project, panels: dict[str, object]) -> str:
     return "\n".join(parts)
 
 
+# A class-by-class matrix past this size is unreadable, and its cells grow with
+# the square of the classes (27 MB of the page's payload at 3,000 classes).
+MATRIX_MAX_LABELS = 25
+
+
 def _matrix(project: Project) -> dict[str, object]:
     counts: Counter[tuple[str, str]] = Counter()
     for triplet in project.ontology.triplets:
         if triplet.subject_type and triplet.object_type:
             counts[(triplet.subject_type, triplet.object_type)] += 1
-    labels = sorted({name for pair in counts for name in pair})
+    involvement: Counter[str] = Counter()
+    for (source, target), count in counts.items():
+        involvement[source] += count
+        involvement[target] += count
+    total = len(involvement)
+    labels = sorted(name for name, _ in involvement.most_common(MATRIX_MAX_LABELS))
     rows = []
     for source in labels:
         rows.append(
@@ -263,7 +288,10 @@ def _matrix(project: Project) -> dict[str, object]:
                 "cells": [counts[(source, target)] for target in labels],
             }
         )
-    return {"labels": labels, "rows": rows}
+    matrix: dict[str, object] = {"labels": labels, "rows": rows}
+    if total > len(labels):
+        matrix["truncated"] = {"shown": len(labels), "total": total}
+    return matrix
 
 
 def _timeline(project: Project) -> list[dict[str, object]]:

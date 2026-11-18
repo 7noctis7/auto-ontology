@@ -48,6 +48,8 @@
       orphanHelp: "Entité sans relation, ou classe isolée.",
       filterOrphans: "Filtrer les orphelins", clearFilter: "Filtre retiré",
       noGraph: "La bibliothèque de graphe n'a pas été chargée. Les autres vues restent disponibles.",
+      graphTruncated: "Graphe réduit aux {shown} nœuds les plus connectés sur {total}. Le glossaire et les faits listent tout.",
+      hiddenNode: "« {name} » n'est pas dessiné (graphe réduit) : retrouvez-le dans le glossaire ou les faits.",
       statusOk: "complet", statusIncomplete: "incomplet", statusFailed: "échec",
       statusCancelled: "annulé", statusRunning: "en cours"
     },
@@ -92,6 +94,8 @@
       orphanHelp: "Entity with no relation, or an isolated class.",
       filterOrphans: "Filter orphans", clearFilter: "Filter cleared",
       noGraph: "The graph library did not load. The other views still work.",
+      graphTruncated: "Graph reduced to the {shown} most connected nodes of {total}. The glossary and facts list everything.",
+      hiddenNode: "\u201c{name}\u201d is not drawn (reduced graph): find it in the glossary or the facts.",
       statusOk: "complete", statusIncomplete: "incomplete", statusFailed: "failed",
       statusCancelled: "cancelled", statusRunning: "running"
     }
@@ -441,9 +445,24 @@
     });
   }
 
+  function graphNotice() {
+    var wrap = document.getElementById("graph-wrap");
+    if (!wrap) return;
+    var note = document.getElementById("graph-note");
+    var cut = state && state.graph && state.graph.truncated;
+    if (!cut) { if (note) note.hidden = true; return; }
+    if (!note) {
+      note = el("p", { id: "graph-note", class: "graph-note", role: "status" }, []);
+      wrap.appendChild(note);
+    }
+    note.textContent = t("graphTruncated").replace("{shown}", cut.shown).replace("{total}", cut.total);
+    note.hidden = false;
+  }
+
   function renderGraph() {
     var built = visibleGraph();
     renderLegend(built.nodes);
+    graphNotice();
     if (typeof vis === "undefined") {
       document.getElementById("graph").textContent = t("noGraph");
       return;
@@ -1094,6 +1113,12 @@
           return node.label.toLowerCase() === value.toLowerCase();
         })[0];
         if (match) { selected = match.id; network.focus(match.id, { scale: 1.1, animation: false }); renderSide(); }
+        else {
+          var hidden = ((state.graph && state.graph.hidden) || []).filter(function (node) {
+            return node.label.toLowerCase() === value.toLowerCase();
+          })[0];
+          if (hidden) showBanner(t("hiddenNode").replace("{name}", hidden.label));
+        }
       }
     }, 160);
   });

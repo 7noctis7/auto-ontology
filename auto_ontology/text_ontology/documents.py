@@ -318,6 +318,23 @@ def load_text(filename: str, text: str) -> LoadedDocument:
     return _finish(name, "text/plain", text, [], original)
 
 
+# Formats whose text is not the file's bytes: they go through their reader.
+_STRUCTURED_SUFFIXES = _PDF_SUFFIXES | _EPUB_SUFFIXES | _DOCX_SUFFIXES | _HTML_SUFFIXES
+
+
+def read_document_text(filename: str, data: bytes) -> tuple[str, list[str]]:
+    """The text of a file for the command line, and what reading it noted.
+
+    PDF, EPUB, DOCX and HTML go through the studio's readers (and their
+    cleaning). Anything else is decoded as it is, so a plain text file reaches
+    the extractor untouched unless ``--clean`` is asked for.
+    """
+    if _suffix(filename) in _STRUCTURED_SUFFIXES:
+        loaded = load_bytes(filename, data)
+        return loaded.text, list(loaded.warnings)
+    return _decode(data), []
+
+
 def load_bytes(filename: str, data: bytes) -> LoadedDocument:
     """Read *data* according to the suffix of *filename*."""
     name = filename.strip() or "document.txt"

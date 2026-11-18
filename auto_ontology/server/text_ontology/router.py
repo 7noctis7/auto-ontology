@@ -69,6 +69,11 @@ class TextOntologyExtractRequest(BaseModel):
         default=False,
         description="Drop PDF noise (diagram labels, code, formulas, references) first.",
     )
+    lang: str = Field(
+        default="auto",
+        max_length=10,
+        description="Language of the names: auto (the base's, else the text's), fr, en...",
+    )
 
 
 class TextOntologyMergeRequest(BaseModel):
@@ -115,6 +120,7 @@ def extract_ontology_from_text(body: TextOntologyExtractRequest) -> dict:
             base=body.base,
             skip_failed_chunks=body.skip_failed_chunks,
             clean=body.clean,
+            lang=body.lang,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

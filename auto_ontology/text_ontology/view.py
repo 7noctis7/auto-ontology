@@ -13,6 +13,7 @@ hierarchy and an entity is large when it has many relations.
 
 from __future__ import annotations
 
+import os
 from collections import Counter, defaultdict
 
 from auto_ontology.text_ontology.analysis import annotate_graph, build_panels, genre_ids
@@ -20,6 +21,57 @@ from auto_ontology.text_ontology.schema_layer import infer_base_type, sync_schem
 from auto_ontology.text_ontology.export import _graph
 from auto_ontology.text_ontology.provenance import entity_key
 from auto_ontology.text_ontology.studio_models import Project
+
+
+# Past this many nodes the graph is not drawable in a browser anyway (vis-network
+# slows to a crawl), and the payload grows by megabytes: the most connected
+# nodes are drawn and the rest stay findable by name.
+DEFAULT_GRAPH_MAX_NODES = 1500
+
+
+def graph_max_nodes() -> int:
+    """The drawn-graph cap, from ``ONTOLOGY_GRAPH_MAX_NODES`` (default 1500)."""
+    raw = os.environ.get("ONTOLOGY_GRAPH_MAX_NODES", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_GRAPH_MAX_NODES
+    except ValueError:
+        value = DEFAULT_GRAPH_MAX_NODES
+    return max(value, 50)
+
+
+def _drawn_graph(
+    nodes: list[dict[str, object]], edges: list[dict[str, object]], cap: int
+) -> dict[str, object]:
+    """The graph the page draws: everything, or the *cap* most connected nodes.
+
+    Hidden nodes are listed by id, label and kind, so the page can still find
+    them by name and say why they are not drawn.
+    """
+    if len(nodes) <= cap:
+        return {"nodes": nodes, "edges": edges}
+    ranked = sorted(
+        nodes,
+        key=lambda node: (
+            -int(node.get("degree") or 0),  # type: ignore[call-overload]
+            node.get("kind") != "class",
+            str(node.get("label")),
+        ),
+    )
+    keep = {str(node["id"]) for node in ranked[:cap]}
+    return {
+        "nodes": [node for node in nodes if str(node["id"]) in keep],
+        "edges": [
+            edge
+            for edge in edges
+            if str(edge["from"]) in keep and str(edge["to"]) in keep
+        ],
+        "truncated": {"shown": len(keep), "total": len(nodes)},
+        "hidden": [
+            {"id": node["id"], "label": node["label"], "kind": node["kind"]}
+            for node in nodes
+            if str(node["id"]) not in keep
+        ],
+    }
 
 
 def _root(name: str, parents: dict[str, str | None]) -> str:
@@ -67,7 +119,8 @@ def build_view(
     projects: list[dict[str, object]],
 ) -> dict[str, object]:
     """Everything the page needs for *project*, in one response."""
-    graph = _graph(project.ontology)
+    # Every write normalizes the stored ontology, so it is not redone here.
+    graph = _graph(project.ontology, normalized=True)
     parents = dict(graph.classes)
     degree: dict[tuple[str, str], int] = defaultdict(int)
     for name, parent in graph.classes.items():
@@ -99,6 +152,16 @@ def build_view(
     }
     class_sources = {item.name: item.sources for item in project.classes}
     docs_of_node: dict[tuple[str, str], set[str]] = defaultdict(set)
+    # Documents behind each entity, from its relations, gathered in one pass.
+    relation_documents: dict[str, set[str]] = defaultdict(set)
+    for triplet in graph.relations:
+        for source in triplet_sources.get(
+            (triplet.subject, triplet.predicate, triplet.object), []
+        ):
+            relation_documents[triplet.subject].add(source.document_id)
+            relation_documents[triplet.object].add(source.document_id)
+    extra_children = {child for child, _ in graph.extra_parents}
+    extra_parent_names = {parent_name for _, parent_name in graph.extra_parents}
 
     def remember(kind: str, name: str, document_ids: set[str]) -> None:
         docs_of_node[(kind, name)].update(document_ids)
@@ -113,8 +176,8 @@ def build_view(
             parent is None
             and children[name] == 0
             and instances[name] == 0
-            and name not in {parent_name for _, parent_name in graph.extra_parents}
-            and name not in {child for child, _ in graph.extra_parents}
+            and name not in extra_parent_names
+            and name not in extra_children
         )
         if orphan:
             class_orphans.append(name)
@@ -143,13 +206,7 @@ def build_view(
         family = ""
         if entity.types:
             family = _root(entity.types[0], parents)
-        document_ids: set[str] = set()
-        for triplet in graph.relations:
-            if entity.name in {triplet.subject, triplet.object}:
-                for source in triplet_sources.get(
-                    (triplet.subject, triplet.predicate, triplet.object), []
-                ):
-                    document_ids.add(source.document_id)
+        document_ids = set(relation_documents.get(entity.name, ()))
         for key, values in entity.attributes.items():
             for value in values:
                 for source in attribute_sources.get((entity.name, key, value), []):
@@ -404,7 +461,7 @@ def build_view(
             ),
             "insight_classes": [item["name"] for item in top_classes[:3]],
         },
-        "graph": {"nodes": nodes, "edges": edges},
+        "graph": _drawn_graph(nodes, edges, graph_max_nodes()),
         "glossary": glossary,
         "facts": facts,
         "documents": per_document,

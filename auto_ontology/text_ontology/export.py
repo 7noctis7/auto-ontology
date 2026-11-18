@@ -86,10 +86,12 @@ class _Graph:
     class_attributes: dict[str, dict[str, list[str]]]
 
 
-def _graph(ontology: TextOntology) -> _Graph:
+def _graph(ontology: TextOntology, *, normalized: bool = False) -> _Graph:
     # Normalized first: an export may read a file edited by hand, and every
-    # exporter relies on declared classes and canonical names.
-    ontology, _ = normalize_ontology(ontology)
+    # exporter relies on declared classes and canonical names. A caller that
+    # holds a stored project, normalized on every write, skips that pass.
+    if not normalized:
+        ontology, _ = normalize_ontology(ontology)
     classes = {c.name: c.parent for c in ontology.classes}
     descriptions = {c.name: c.description for c in ontology.classes if c.description}
     entities: dict[str, _Entity] = {}

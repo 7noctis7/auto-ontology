@@ -42,9 +42,11 @@ from auto_ontology.text_ontology.export import (  # noqa: E402
 )
 from auto_ontology.utils import llm_invoke  # noqa: E402
 from auto_ontology.text_ontology.clean import clean_text  # noqa: E402
+from auto_ontology.text_ontology.documents import read_document_text  # noqa: E402
 from auto_ontology.text_ontology.extractor import (  # noqa: E402
     DEFAULT_MAX_TOKENS,
     DEFAULT_CHUNK_CHARS,
+    DEFAULT_OVERLAP_CHARS,
     TextOntologyExtractionError,
     resolve_backend,
     extract_text_ontology,
@@ -64,10 +66,17 @@ class CliError(Exception):
 
 
 def _read_text(paths: list[str]) -> str:
-    texts = [
-        sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
-        for path in paths
-    ]
+    """The text of every input: stdin, plain text, or PDF/EPUB/DOCX/HTML."""
+    texts: list[str] = []
+    for path in paths:
+        if path == "-":
+            texts.append(sys.stdin.read())
+            continue
+        file = Path(path)
+        text, notes = read_document_text(file.name, file.read_bytes())
+        for note in notes:
+            print(f"note: {file.name}: {note}", file=sys.stderr)
+        texts.append(text)
     return "\n\n".join(texts)
 
 
@@ -127,6 +136,8 @@ def _extract(args: argparse.Namespace) -> None:
         skip_failed_chunks=args.skip_failed_chunks,
         clean=args.clean,
         backend=backend,
+        lang=args.lang,
+        overlap_chars=args.overlap_chars,
     )
     _warn(result.warnings)
     output = args.output or (str(project) if project else None)
@@ -188,7 +199,7 @@ def _parser() -> argparse.ArgumentParser:
         "inputs",
         nargs="*",
         default=["-"],
-        help="Text files to read; '-' (the default) reads standard input.",
+        help="Files to read: text, Markdown, PDF, EPUB, DOCX or HTML; '-' (the default) reads standard input.",
     )
     extract.add_argument(
         "--project",
@@ -241,6 +252,19 @@ def _parser() -> argparse.ArgumentParser:
         "is then marked INCOMPLETE in the warnings.",
     )
     extract.add_argument(
+        "--lang",
+        default="auto",
+        help="Language of class, relation and attribute names: auto (the "
+        "project's, else the text's), fr, en, or another code.",
+    )
+    extract.add_argument(
+        "--overlap-chars",
+        type=int,
+        default=DEFAULT_OVERLAP_CHARS,
+        help=f"End of the previous chunk restated as context (default "
+        f"{DEFAULT_OVERLAP_CHARS}; 0 turns it off).",
+    )
+    extract.add_argument(
         "--clean",
         action="store_true",
         help="Drop PDF noise first (diagram labels, code, formulas, page numbers, "
@@ -271,7 +295,7 @@ def _parser() -> argparse.ArgumentParser:
         "inputs",
         nargs="*",
         default=["-"],
-        help="Text files to read; '-' (the default) reads standard input.",
+        help="Files to read: text, Markdown, PDF, EPUB, DOCX or HTML; '-' (the default) reads standard input.",
     )
     clean.add_argument("--output", "-o", help="Write the cleaned text here.")
     clean.set_defaults(handler=_clean)
