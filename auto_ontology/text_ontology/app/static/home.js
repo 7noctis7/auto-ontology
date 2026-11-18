@@ -78,7 +78,8 @@
     if (running.length) {
       var doc = running[0];
       var counted = doc.chunks_total ? number(doc.chunks_done) + "/" + number(doc.chunks_total) : "";
-      out.extract = state.extracting
+      // An older server sends no "extracting": then trust the running status.
+      out.extract = state.extracting !== false
         ? ["running", doc.filename + (counted ? " : " + counted + (fr ? " morceaux lus." : " chunks read.") : "")]
         : ["warn", doc.filename + (fr
           ? " : extraction interrompue" + (counted ? " à " + counted : "") + ". Redéposez le fichier : les morceaux déjà lus viennent du cache."
