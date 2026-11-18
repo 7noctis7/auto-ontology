@@ -14166,6 +14166,13 @@
             "title": "Known Predicates",
             "type": "array"
           },
+          "lang": {
+            "default": "auto",
+            "description": "Language of the names: auto (the base's, else the text's), fr, en...",
+            "maxLength": 10,
+            "title": "Lang",
+            "type": "string"
+          },
           "reuse_glossary": {
             "default": false,
             "description": "Also reuse the glossary's Term names as known classes.",

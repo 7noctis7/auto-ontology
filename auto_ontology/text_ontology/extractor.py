@@ -13,9 +13,9 @@ created again (rule 1 of the system prompt). The union is then normalized by
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
-import os
 import re
 import threading
 from collections.abc import Callable, Iterable, Sequence
@@ -29,11 +29,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.text_ontology.cache import ChunkCache, chunk_cache_key
 from auto_ontology.text_ontology.clean import clean_text
-from auto_ontology.text_ontology.local_llm import (
-    LocalChatModel,
-    detect_model,
-    is_local_endpoint,
-)
+from auto_ontology.text_ontology.llm_settings import build_llm, resolve_llm_config
+from auto_ontology.text_ontology.local_llm import LocalChatModel
 from auto_ontology.text_ontology.models import TextOntology, TextOntologyResult
 from auto_ontology.text_ontology.normalize import (
     ascii_fold,
@@ -44,9 +41,7 @@ from auto_ontology.text_ontology.normalize import (
     split_words,
     to_pascal_case,
 )
-from auto_ontology.utils import llm_invoke
-from auto_ontology.utils.llm_invoke import get_llm_client, invoke_with_structured_output
-from auto_ontology.utils.model_config import resolve
+from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -386,51 +381,37 @@ class StructuredBackend:
 Provider = Literal["auto", "local", "hosted"]
 
 
-def _explicit_model() -> str | None:
-    """The model the environment names, ignoring the built-in hosted defaults."""
-    for name in ("REASONING_MODEL", "DEFAULT_MODELS_MODEL", "MODEL_NAME"):
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return None
-
-
 def resolve_backend(
     *,
     provider: Provider = "auto",
     model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    timeout: int | None = None,
 ) -> StructuredBackend | LocalChatModel:
-    """The client that will answer, from the ``REASONING_*`` settings.
+    """The client that will answer, from the same settings as the studio.
 
+    ``ONTOLOGY_LLM_*``, then ``REASONING_*`` (and their fallbacks), then the
+    studio's saved settings, then the NVIDIA defaults: see
+    :func:`~auto_ontology.text_ontology.llm_settings.resolve_llm_config`.
     ``auto`` talks to a server on this machine or the private network (LM
     Studio, Ollama, llama.cpp) through :class:`LocalChatModel`, which works
-    with any model they load, and to anything else through the application's
-    client. *model* overrides ``REASONING_MODEL``; ``"auto"``, or no model at
-    all on a local server, uses the model the server has loaded.
+    with any model they load; ``local`` and ``hosted`` force either path.
+    *model* overrides the configured one; ``"auto"`` uses the model a local
+    server has loaded.
     """
-    endpoint = resolve("REASONING", "ENDPOINT")
-    local = provider == "local" or (
-        provider == "auto" and bool(endpoint) and is_local_endpoint(endpoint)
-    )
-    if local:
-        if not endpoint:
-            raise EnvironmentError("REASONING_ENDPOINT is not set")
-        api_key = resolve("REASONING", "API_KEY") or "local"
-        name = model or _explicit_model()
-        if not name or name == "auto":
-            name = detect_model(endpoint, api_key)
-        return LocalChatModel(
-            base_url=endpoint,
-            model=name,
-            api_key=api_key,
-            timeout=float(llm_invoke.LLM_INVOKE_TIMEOUT_S),
-            max_tokens=max_tokens,
-        )
-    kwargs: dict[str, object] = {"temperature": 0.0, "max_tokens": max_tokens}
-    if model and model != "auto":
-        kwargs["model"] = model
-    return StructuredBackend(get_llm_client(**kwargs))
+    config = resolve_llm_config()
+    use_local = None if provider == "auto" else provider == "local"
+    local = config.local if use_local is None else use_local
+    changes: dict[str, object] = {"max_tokens": max_tokens}
+    if timeout:
+        changes["timeout_s"] = timeout
+    if model == "auto":
+        if local:
+            changes["model"] = ""
+    elif model:
+        changes["model"] = model
+    llm = build_llm(dataclasses.replace(config, **changes), local=use_local)
+    return llm if isinstance(llm, LocalChatModel) else StructuredBackend(llm)
 
 
 def extract_text_ontology(

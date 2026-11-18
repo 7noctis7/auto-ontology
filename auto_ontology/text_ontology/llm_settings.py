@@ -25,7 +25,7 @@ from auto_ontology.text_ontology.local_llm import (
     detect_model,
     is_local_endpoint,
 )
-from auto_ontology.text_ontology.store import ProjectStore
+from auto_ontology.text_ontology.store import ProjectStore, default_home, read_settings
 
 NVIDIA_INTEGRATE = "https://integrate.api.nvidia.com/v1"
 NVIDIA_INFERENCE = "https://inference-api.nvidia.com/v1"
@@ -81,9 +81,14 @@ def _defaults_for(api_key: str) -> tuple[str, str]:
     return NVIDIA_INTEGRATE, NVIDIA_MODEL
 
 
-def resolve_llm_config(store: ProjectStore) -> LlmConfig:
-    """Environment, then the settings file, then the NVIDIA defaults."""
-    saved = store.settings()
+def resolve_llm_config(store: ProjectStore | None = None) -> LlmConfig:
+    """Environment, then the settings file, then the NVIDIA defaults.
+
+    The one resolver for the studio and the command line, so the same
+    ``.env`` and the same saved settings pick the same model in both. Without
+    a *store*, the settings of the default home are read (nothing is created).
+    """
+    saved = store.settings() if store is not None else read_settings(default_home())
     env_key = _first_env(
         "ONTOLOGY_LLM_API_KEY",
         "REASONING_API_KEY",
@@ -181,18 +186,25 @@ def _nvidia_host(endpoint: str) -> bool:
     return host.endswith("nvidia.com")
 
 
-def build_llm(config: LlmConfig) -> BaseChatModel | LocalChatModel:
+def build_llm(
+    config: LlmConfig, *, local: bool | None = None
+) -> BaseChatModel | LocalChatModel:
     """A chat client for *config*.
 
     A local server (LM Studio, Ollama, llama.cpp) gets :class:`LocalChatModel`,
     which works with whatever model it has loaded: it detects that model when
     none is named, steps down from a JSON schema the model refuses, and reads
     answers wrapped in reasoning or Markdown. NVIDIA hosts keep the product's
-    client; any other endpoint gets an OpenAI client.
+    client; any other endpoint gets an OpenAI client. *local* forces the
+    local-server client (``True``) or the hosted one (``False``) whatever the
+    endpoint's address.
     """
-    if not config.configured:
+    use_local = config.local if local is None else local
+    if use_local and not config.endpoint.strip():
         raise EnvironmentError(NO_KEY_MESSAGE)
-    if config.local:
+    if not use_local and not (config.api_key.strip() and config.model.strip()):
+        raise EnvironmentError(NO_KEY_MESSAGE)
+    if use_local:
         api_key = config.api_key or "local"
         try:
             model = config.model or detect_model(config.endpoint, api_key)

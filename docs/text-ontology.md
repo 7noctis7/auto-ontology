@@ -99,7 +99,7 @@ A local model is slower than a hosted one, and a small one extracts better
 from short, clean chunks. A good starting point is:
 
 ```bash
-uv run python -m auto_ontology.text_ontology document.txt --clean \
+uv run ontology document.txt --clean \
   --chunk-chars 5000 --timeout 600 --max-tokens 4096 --skip-failed-chunks \
   --log-level INFO -o ontologie.json
 ```
@@ -132,7 +132,7 @@ lines and never rewrites the prose. The title block (title, authors, contact)
 is kept. To preview what will be extracted, without calling a model:
 
 ```bash
-uv run python -m auto_ontology.text_ontology clean document.txt -o propre.txt
+uv run ontology clean document.txt -o propre.txt
 ```
 
 ## Command line
@@ -142,20 +142,20 @@ unless `-o` is given. Warnings and errors go to standard error.
 
 ```bash
 # Extract one document (`extract` can be omitted)
-uv run python -m auto_ontology.text_ontology document.txt -o ontologie.json
+uv run ontology document.txt -o ontologie.json
 
 # Grow a project ontology, document after document
-uv run python -m auto_ontology.text_ontology extract doc1.txt --project projet.json
-uv run python -m auto_ontology.text_ontology extract doc2.txt --project projet.json
+uv run ontology extract doc1.txt --project projet.json
+uv run ontology extract doc2.txt --project projet.json
 
 # Merge results produced separately (earliest file first: it wins ties)
-uv run python -m auto_ontology.text_ontology merge a.json b.json -o projet.json
+uv run ontology merge a.json b.json -o projet.json
 
 # Export
-uv run python -m auto_ontology.text_ontology export projet.json -f html -o graphe.html
-uv run python -m auto_ontology.text_ontology export projet.json -f mermaid -o graphe.mmd
-uv run python -m auto_ontology.text_ontology export projet.json -f turtle -o ontologie.ttl
-uv run python -m auto_ontology.text_ontology export projet.json -f cypher -o import.cypher
+uv run ontology export projet.json -f html -o graphe.html
+uv run ontology export projet.json -f mermaid -o graphe.mmd
+uv run ontology export projet.json -f turtle -o ontologie.ttl
+uv run ontology export projet.json -f cypher -o import.cypher
 ```
 
 ### Extract options
@@ -172,7 +172,44 @@ uv run python -m auto_ontology.text_ontology export projet.json -f cypher -o imp
 | `--clean` | Removes PDF noise and rejoins wrapped lines before extracting. |
 | `--model NAME` | Model to use instead of `REASONING_MODEL`. `auto` uses the model the local server has loaded. |
 | `--provider auto\|local\|hosted` | `auto` (the default) uses the local-server path for an endpoint on this machine or the private network. |
+| `--lang auto\|fr\|en\|…` | Language of class, relation and attribute names. `auto` keeps the project's language, else the text's. Without it, a French prompt on an English text mixed `Block` and `Bloc`. |
+| `--overlap-chars N` | End of the previous chunk restated as context, so a pronoun or a fact across a cut is understood. The default is 600; 0 turns it off. |
 | `--log-level INFO` | Prints one line per chunk, so a long extraction shows its progress. |
+
+Inputs can be text or Markdown files, or PDF, EPUB, DOCX and HTML, read the
+way the studio reads them. A text file in another encoding than UTF-8 is read
+too. Each chunk's message also tells the model that `est_un` links two
+classes only (an entity's type goes in `subject_type` or `object_type`).
+
+The model is chosen as in the studio: `ONTOLOGY_LLM_*`, then `REASONING_*`
+(and their fallbacks), then the settings saved in the studio, then the NVIDIA
+defaults. The same `.env` therefore picks the same model in both.
+
+`ontology` and `python -m auto_ontology.text_ontology` are the same command:
+both accept `extract`, `merge`, `export`, `clean`, `eval` and the studio's
+`serve`, `import`, `ask`, `mcp` and `sdk`. `ontology --help` lists them all.
+
+## Measuring extraction quality
+
+`eval` scores an extraction against a reference written by hand: precision,
+recall and F1 for classes, hierarchy, entities, triplets, links and
+attributes. Both sides are normalized first. `links` counts two entities as
+related whatever the predicate's wording or direction, so a good `links`
+score with a poor `triplets` score means the facts are found but named
+differently.
+
+```bash
+# Compare an extraction with a reference
+uv run ontology eval found.json gold.json
+
+# Run the configured model on the bundled corpus (two French texts, one English)
+uv run ontology eval --corpus --lang auto
+
+# Your own corpus: <name>.txt next to <name>.gold.json
+uv run ontology eval --corpus mon-corpus/ --json -o scores.json
+```
+
+Run it before and after changing the model, the prompt or `--chunk-chars`.
 
 ## Exports
 
@@ -186,6 +223,16 @@ uv run python -m auto_ontology.text_ontology export projet.json -f cypher -o imp
 ```bash
 cypher-shell -u neo4j -p <password> -f import.cypher
 ```
+
+## Large projects
+
+The studio's view is rebuilt on every display; its cost now grows linearly
+with the project. Past 1,500 nodes (`ONTOLOGY_GRAPH_MAX_NODES`), the page
+draws the most connected ones and says so; the others stay in the glossary
+and the facts, and a search for one says where to find it. The class matrix
+keeps the 25 most connected classes. While an extraction runs, every API
+route that writes answers 409 instead of being overwritten by the
+extraction's final save.
 
 ## API
 

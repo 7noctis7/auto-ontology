@@ -44,6 +44,17 @@ def default_home() -> Path:
     return Path.home() / "AutoOntology"
 
 
+def read_settings(home: Path) -> StudioSettings:
+    """The saved studio settings under *home*, or defaults. Creates nothing."""
+    path = Path(home) / "settings.json"
+    if not path.is_file():
+        return StudioSettings()
+    try:
+        return StudioSettings.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return StudioSettings()
+
+
 class ProjectStore:
     """Read and write the studio's files under one home directory."""
 
@@ -62,13 +73,7 @@ class ProjectStore:
         return self.project_dir(project_id) / "cache"
 
     def settings(self) -> StudioSettings:
-        path = self.home / "settings.json"
-        if not path.is_file():
-            return StudioSettings()
-        try:
-            return StudioSettings.model_validate_json(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return StudioSettings()
+        return read_settings(self.home)
 
     def load_memory(self) -> Memory:
         """Corrections shared by every project in this home directory."""

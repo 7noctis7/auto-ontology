@@ -376,18 +376,49 @@ def test_extract_can_skip_a_failed_chunk_and_says_the_result_is_incomplete(
 def test_extract_passes_the_answer_budget_to_the_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: dict[str, Any] = {}
+    seen: list[Any] = []
 
-    def fake_client(**kwargs: Any) -> _FakeLLM:
-        seen.update(kwargs)
+    def fake_build(config: Any, *, local: bool | None = None) -> _FakeLLM:
+        seen.append(config)
         return _FakeLLM([{}])
 
-    monkeypatch.setattr(extractor, "get_llm_client", fake_client)
+    monkeypatch.setattr(extractor, "build_llm", fake_build)
+    monkeypatch.setenv("REASONING_API_KEY", "nvapi-test")
     monkeypatch.setenv("REASONING_ENDPOINT", "https://llm.example.com/v1")
 
     extract_text_ontology("Un texte.", max_tokens=2048)
 
-    assert seen == {"temperature": 0.0, "max_tokens": 2048}
+    assert seen[0].max_tokens == 2048
+
+
+def test_the_cli_and_the_studio_resolve_the_same_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """ONTOLOGY_LLM_* and the studio's saved settings now reach the CLI too."""
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(tmp_path / "home")
+    settings = store.settings()
+    settings.endpoint = "https://api.example.com/v1"
+    settings.model = "modele-enregistre"
+    settings.api_key = "sk-saved"
+    store.save_settings(settings)
+    monkeypatch.setenv("ONTOLOGY_HOME", str(tmp_path / "home"))
+    for name in ("REASONING_API_KEY", "REASONING_ENDPOINT", "REASONING_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    seen: list[Any] = []
+    monkeypatch.setattr(
+        extractor,
+        "build_llm",
+        lambda config, local=None: seen.append(config) or _FakeLLM([]),
+    )
+
+    extractor.resolve_backend()
+    monkeypatch.setenv("ONTOLOGY_LLM_MODEL", "modele-env")
+    extractor.resolve_backend()
+
+    assert [c.model for c in seen] == ["modele-enregistre", "modele-env"]
+    assert {c.endpoint for c in seen} == {"https://api.example.com/v1"}
 
 
 def test_previous_tail_keeps_whole_last_sentences() -> None:

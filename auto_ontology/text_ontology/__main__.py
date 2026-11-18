@@ -64,7 +64,22 @@ from auto_ontology.text_ontology.project import (  # noqa: E402
     merge_ontologies,
 )
 
-_COMMANDS = ("extract", "merge", "export", "clean", "eval", "serve")
+_COMMANDS = ("extract", "merge", "export", "clean", "eval")
+# Served by the studio's own parser (auto_ontology.text_ontology.studio): both
+# entry points, `ontology` and `python -m auto_ontology.text_ontology`, accept
+# every command and hand the other group over.
+STUDIO_COMMANDS = ("serve", "import", "ask", "mcp", "sdk")
+
+_EPILOG = """\
+Studio commands (same entry point):
+  serve    open the local studio in the browser (no database, no login)
+  import   extract files into the current studio project
+  ask      answer from the current project's facts, with sources
+  mcp      read-only MCP server on standard input
+  sdk      write a Python client for the current project's schema
+
+`<command> --help` describes each one. Without a command, files are extracted:
+`ontology document.pdf` is `ontology extract document.pdf`."""
 
 
 class CliError(Exception):
@@ -232,8 +247,11 @@ _LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m auto_ontology.text_ontology",
-        description="Extract, merge and export ontologies from text.",
+        prog="ontology",
+        description="Extract, merge, export and evaluate ontologies from text, "
+        "or open the local studio.",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--log-level",
@@ -431,38 +449,35 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--output", "-o", help="Write the export here.")
     export.set_defaults(handler=_export)
 
-    serve = commands.add_parser(
-        "serve",
-        parents=[common],
-        help="Open the local studio in the browser (no database, no login).",
-    )
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=None)
-    serve.add_argument("--no-browser", action="store_true")
-    serve.add_argument("--home", default=None)
-    serve.add_argument(
-        "--fake",
-        action="store_true",
-        help="Demo extraction that does not call a model.",
-    )
-    serve.set_defaults(handler=_serve)
     return parser
 
 
-def _serve(args: argparse.Namespace) -> None:
-    from auto_ontology.text_ontology.studio import serve
-
-    serve(
-        host=args.host,
-        port=args.port,
-        open_browser=not args.no_browser,
-        home=Path(args.home) if args.home else None,
-        fake=args.fake,
-    )
+def first_command(args: list[str]) -> str | None:
+    """The command *args* name, past the global options, if any."""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--log-level":
+            index += 2
+        elif arg.startswith("--log-level=") or arg in ("-h", "--help"):
+            index += 1
+        else:
+            return arg
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _with_default_command(list(sys.argv[1:] if argv is None else argv))
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if first_command(raw) in STUDIO_COMMANDS:
+        from auto_ontology.text_ontology.studio import main as studio_main
+
+        return studio_main(raw)
+    if not raw and sys.stdin.isatty():
+        # Nothing to read: a bare command at a terminal shows what it can do
+        # instead of waiting silently on standard input.
+        _parser().print_help()
+        return 0
+    args = _with_default_command(raw)
     parsed = _parser().parse_args(args)
     _configure_output(parsed.log_level)
     try:

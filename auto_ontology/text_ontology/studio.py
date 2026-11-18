@@ -74,6 +74,14 @@ def main(argv: list[str] | None = None) -> int:
     from auto_ontology.env import load_env
 
     load_env()
+    raw = list(sys.argv[1:] if argv is None else argv)
+    from auto_ontology.text_ontology.__main__ import STUDIO_COMMANDS, first_command
+    from auto_ontology.text_ontology.__main__ import main as text_main
+
+    if first_command(raw) not in STUDIO_COMMANDS:
+        # extract, merge, export, clean, eval, a bare file, or the help that
+        # lists every command: one entry point for both groups.
+        return text_main(raw)
     parser = argparse.ArgumentParser(
         prog="ontology",
         description="Studio local : déposez un document, voyez l'ontologie.",
@@ -122,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sdk_parser.add_argument("--home", default=None)
     sdk_parser.add_argument("--out", default="ontologie_client.py")
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
     if args.command == "serve":
         serve(
             host=args.host,
@@ -183,6 +191,10 @@ def import_paths(paths: list[Path], *, home: Path | None, fake: bool) -> None:
             config=config,
             llm=llm,
             model_label=label,
+            # Both are required: without them `ontology import` failed on
+            # every file with a TypeError, and never imported anything.
+            force=False,
+            cancel_event=None,
             on_event=lambda _event: None,
         )
         project = store.load(project.id)
