@@ -136,3 +136,17 @@ def test_apply_description_leaves_uncurated_routes_alone() -> None:
     apply_description(SimpleNamespace(method="GET", path="/api/not-curated"), component)
 
     assert component.description == "original"
+
+
+def test_apply_description_marks_curated_tools_read_only() -> None:
+    component = SimpleNamespace(description="", annotations=None, title=None)
+
+    apply_description(SimpleNamespace(method="GET", path="/api/terms"), component)
+
+    assert component.annotations.readOnlyHint is True
+    assert component.annotations.destructiveHint is False
+    assert component.title == component.annotations.title == "Search the glossary"
+
+
+def test_every_curated_tool_has_a_title() -> None:
+    assert all(spec.title for spec in CURATED)

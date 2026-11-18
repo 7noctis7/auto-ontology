@@ -241,3 +241,14 @@ def test_html_lists_every_parent_and_every_type() -> None:
     assert kinds.count("est_un") == 2 and kinds.count("type") == 2
     # The legend sits outside the graph container, which the library empties.
     assert page.index('<div id="graph"></div>') < page.index('class="legend"')
+
+
+def test_the_html_page_comes_from_its_template_without_the_license_comment() -> None:
+    from auto_ontology.text_ontology.export import to_html
+    from auto_ontology.text_ontology.sample import sample_ontology
+
+    page = to_html(sample_ontology(), "Ma bibliothèque")
+
+    assert page.startswith("<!doctype html>")
+    assert "SPDX" not in page and "__DATA__" not in page
+    assert "<title>Ma bibliothèque</title>" in page

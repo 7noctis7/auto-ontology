@@ -31,6 +31,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field
 
 from auto_ontology_mcp.config import Settings
+from auto_ontology_mcp.tools import READ_ONLY
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,8 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
 
     @mcp.tool(
         name="check_readiness",
+        title="Check readiness",
+        annotations=READ_ONLY.model_copy(update={"title": "Check readiness"}),
         description=(
             "Report whether this Auto Ontology deployment can answer questions at all: "
             "whether a catalog has been ingested, whether a live database "

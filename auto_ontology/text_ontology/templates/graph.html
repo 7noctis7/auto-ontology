@@ -1,0 +1,562 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+The standalone graph page of `ontology export --format html`. Filled by
+export.to_html: __TITLE__, __VIS_NETWORK_URL__ and __DATA__. This comment
+is dropped from the page.
+-->
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --text: #0b0b0b; --text-2: #52514e;
+    --muted: #898781; --hairline: #e1e0d9; --border: rgba(11, 11, 11, 0.10);
+    --wash: rgba(11, 11, 11, 0.05); --class: #2a78d6; --entity: #eb6834;
+    --edge: #898781; --on-fill: #ffffff; --warning: #fab219;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+      --hairline: #2c2c2a; --border: rgba(255, 255, 255, 0.10);
+      --wash: rgba(255, 255, 255, 0.06); --class: #3987e5; --entity: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+    --hairline: #2c2c2a; --border: rgba(255, 255, 255, 0.10);
+    --wash: rgba(255, 255, 255, 0.06); --class: #3987e5; --entity: #d95926;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--page); color: var(--text); font: 14px/1.45 var(--font);
+    display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: 1fr 360px;
+    grid-template-areas: "head head" "controls controls" "graph side";
+  }
+  header {
+    grid-area: head; display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline;
+    padding: 12px 16px 8px; background: var(--surface); border-bottom: 1px solid var(--hairline);
+  }
+  header h1 { font-size: 17px; margin: 0; word-break: break-word; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--text-2); margin: 0; padding: 0; list-style: none; }
+  .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .controls {
+    grid-area: controls; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--hairline);
+  }
+  .group { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .group > span { color: var(--muted); font-size: 12px; }
+  input[type=search] {
+    font: inherit; padding: 6px 10px; min-width: 220px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--page); color: var(--text);
+  }
+  label.toggle { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); cursor: pointer; }
+  button {
+    font: inherit; color: var(--text); background: transparent; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+  }
+  button:hover { background: var(--wash); }
+  button[aria-pressed="true"] { background: var(--wash); border-color: var(--text-2); }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--class); outline-offset: 1px; }
+  .graph-wrap { grid-area: graph; position: relative; min-height: 0; min-width: 0; background: var(--surface); }
+  #graph { position: absolute; inset: 0; }
+  .graph-wrap .notice { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-2); text-align: center; }
+  .legend {
+    position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px;
+    padding: 6px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-2); font-size: 12px; max-width: calc(100% - 24px); pointer-events: none;
+  }
+  .legend i { display: inline-block; vertical-align: middle; margin-right: 5px; }
+  .sw-class { width: 14px; height: 10px; border-radius: 2px; background: var(--class); }
+  .sw-entity { width: 10px; height: 10px; border-radius: 50%; background: var(--entity); }
+  .sw-multi { width: 14px; height: 10px; border-radius: 2px; background: var(--class); outline: 2px dashed var(--text); outline-offset: -1px; }
+  .sw-line { width: 18px; border-top: 2px solid var(--edge); }
+  .sw-dash { width: 18px; border-top: 2px dashed var(--edge); }
+  .sw-dot { width: 18px; border-top: 2px dotted var(--edge); }
+  aside {
+    grid-area: side; display: flex; flex-direction: column; min-height: 0;
+    background: var(--surface); border-left: 1px solid var(--hairline);
+  }
+  [role=tablist] { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid var(--hairline); }
+  [role=tab] { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px; color: var(--text-2); }
+  [role=tab][aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+  [role=tabpanel] { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; }
+  [role=tabpanel][hidden] { display: none; }
+  h2 { font-size: 16px; margin: 0 0 2px; word-break: break-word; }
+  h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 6px; }
+  .kind { color: var(--text-2); }
+  .empty { color: var(--text-2); }
+  .warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--wash); color: var(--text); }
+  .warn::before { content: "⚠ "; color: var(--warning); font-weight: 700; }
+  ul.plain { margin: 0; padding: 0; list-style: none; }
+  ul.plain li { padding: 3px 0; border-bottom: 1px solid var(--hairline); word-break: break-word; }
+  .link { border: 0; padding: 0; background: none; color: var(--class); text-decoration: underline; text-underline-offset: 2px; }
+  .link:hover { background: none; }
+  .arrow { color: var(--muted); padding: 0 4px; }
+  .tree ul { list-style: none; margin: 0; padding-left: 16px; border-left: 1px solid var(--hairline); }
+  .tree > ul { padding-left: 0; border: 0; }
+  .tree li { margin: 2px 0; }
+  .tree .row { display: flex; align-items: baseline; gap: 6px; }
+  .tree .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .tree .flag { color: var(--text); font-size: 12px; }
+  .tree .flag::before { content: "⚠ "; color: var(--warning); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  th, td { padding: 5px 6px; border-bottom: 1px solid var(--hairline); vertical-align: top; word-break: break-word; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--wash); }
+  .filter { width: 100%; margin-bottom: 8px; }
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto auto 60vh auto; grid-template-areas: "head" "controls" "graph" "side"; }
+    aside { border-left: 0; border-top: 1px solid var(--hairline); min-height: 50vh; }
+    input[type=search] { min-width: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>__TITLE__</h1>
+  <ul class="stats" id="stats"></ul>
+</header>
+<div class="controls" role="toolbar" aria-label="Affichage du graphe">
+  <input type="search" id="search" placeholder="Rechercher un nœud…" list="names" aria-label="Rechercher">
+  <datalist id="names"></datalist>
+  <div class="group">
+    <span>Afficher</span>
+    <label class="toggle"><input type="checkbox" id="show-classes" checked> Classes</label>
+    <label class="toggle"><input type="checkbox" id="show-entities" checked> Entités</label>
+    <label class="toggle"><input type="checkbox" id="show-types"> Liens de type</label>
+    <label class="toggle"><input type="checkbox" id="show-labels" checked> Noms des relations</label>
+  </div>
+  <div class="group">
+    <span>Disposition</span>
+    <button type="button" id="layout-network" aria-pressed="true">Réseau</button>
+    <button type="button" id="layout-tree" aria-pressed="false">Hiérarchie</button>
+  </div>
+  <div class="group">
+    <button type="button" id="fit">Ajuster</button>
+    <button type="button" id="physics" aria-pressed="false">Animer</button>
+    <button type="button" id="png">PNG</button>
+    <button type="button" id="theme" title="Thème : automatique, clair ou sombre">Thème : auto</button>
+  </div>
+</div>
+<div class="graph-wrap">
+  <div id="graph"></div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw-class"></i>Classe</span>
+    <span><i class="sw-entity"></i>Entité</span>
+    <span><i class="sw-multi"></i>⚠ Plusieurs parents</span>
+    <span><i class="sw-line"></i>Relation</span>
+    <span><i class="sw-dash"></i>est_un</span>
+    <span><i class="sw-dot"></i>Type</span>
+  </div>
+</div>
+<aside>
+  <div role="tablist" aria-label="Panneaux">
+    <button type="button" role="tab" id="tab-details" aria-controls="panel-details" aria-selected="true">Détails</button>
+    <button type="button" role="tab" id="tab-classes" aria-controls="panel-classes" aria-selected="false">Classes</button>
+    <button type="button" role="tab" id="tab-table" aria-controls="panel-table" aria-selected="false">Tableau</button>
+  </div>
+  <div role="tabpanel" id="panel-details" aria-labelledby="tab-details">
+    <p class="empty">Cliquez sur un nœud, une classe ou une ligne du tableau. Échap annule la sélection.</p>
+  </div>
+  <div role="tabpanel" id="panel-classes" aria-labelledby="tab-classes" hidden>
+    <p class="empty">Cliquez sur une classe pour mettre en évidence sa famille : ses sous-classes et leurs entités.</p>
+    <div class="tree" id="tree"></div>
+  </div>
+  <div role="tabpanel" id="panel-table" aria-labelledby="tab-table" hidden>
+    <input type="search" class="filter" id="table-filter" placeholder="Filtrer le tableau…" aria-label="Filtrer le tableau">
+    <h3>Relations</h3>
+    <table><thead><tr><th>Sujet</th><th>Relation</th><th>Objet</th></tr></thead><tbody id="rows-relations"></tbody></table>
+    <h3>Attributs</h3>
+    <table><thead><tr><th>Entité</th><th>Attribut</th><th>Valeur</th></tr></thead><tbody id="rows-attributes"></tbody></table>
+  </div>
+</aside>
+<script type="application/json" id="ontology-data">__DATA__</script>
+<script src="__VIS_NETWORK_URL__"></script>
+<script>
+(function () {
+  "use strict";
+  var data = JSON.parse(document.getElementById("ontology-data").textContent);
+  var root = document.documentElement;
+  function $(id) { return document.getElementById(id); }
+  function el(tag, text, cls) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) { node.textContent = text; }
+    if (cls) { node.className = cls; }
+    return node;
+  }
+
+  // --- Model ---------------------------------------------------------------
+  var byId = {}, classByName = {}, entityByName = {};
+  data.nodes.forEach(function (n) {
+    byId[n.id] = n;
+    n.parents = n.parents || [];
+    n.types = n.types || [];
+    n.attributes = n.attributes || {};
+    if (n.kind === "classe") { classByName[n.label] = n; } else { entityByName[n.label] = n; }
+  });
+  var children = {};
+  data.nodes.forEach(function (n) {
+    n.parents.forEach(function (p) { (children[p] = children[p] || []).push(n.label); });
+  });
+  function descendants(name) {
+    var found = {}, pending = [name];
+    while (pending.length) {
+      var current = pending.pop();
+      if (found[current]) { continue; }
+      found[current] = true;
+      (children[current] || []).forEach(function (c) { pending.push(c); });
+    }
+    return found;
+  }
+  data.nodes.forEach(function (n) {
+    if (n.kind !== "classe") { return; }
+    var family = descendants(n.label), count = 0;
+    data.nodes.forEach(function (m) {
+      if (m.kind === "entite" && m.types.some(function (t) { return family[t]; })) { count += 1; }
+    });
+    n.instances = count;
+  });
+  var relations = data.edges.filter(function (e) { return e.kind === "relation"; });
+  var attributeRows = [];
+  data.nodes.forEach(function (n) {
+    Object.keys(n.attributes).forEach(function (k) {
+      n.attributes[k].forEach(function (v) { attributeRows.push([n, k, v]); });
+    });
+  });
+
+  // --- Header --------------------------------------------------------------
+  [["Classes", Object.keys(classByName).length], ["Entités", Object.keys(entityByName).length],
+   ["Relations", relations.length], ["Attributs", attributeRows.length]].forEach(function (s) {
+    var li = el("li");
+    li.appendChild(el("b", String(s[1])));
+    li.appendChild(document.createTextNode(" " + s[0].toLowerCase()));
+    $("stats").appendChild(li);
+  });
+  data.nodes.forEach(function (n) { $("names").appendChild(el("option")).value = n.label; });
+
+  // --- Theme ---------------------------------------------------------------
+  var THEMES = ["auto", "light", "dark"], LABELS = { auto: "auto", light: "clair", dark: "sombre" };
+  function readTheme() { try { return localStorage.getItem("ontology-theme") || "auto"; } catch (e) { return "auto"; } }
+  function applyTheme(theme) {
+    if (theme === "auto") { delete root.dataset.theme; } else { root.dataset.theme = theme; }
+    $("theme").textContent = "Thème : " + LABELS[theme];
+    try { localStorage.setItem("ontology-theme", theme); } catch (e) { /* private mode */ }
+    if (network) { restyle(); }
+  }
+  $("theme").addEventListener("click", function () {
+    var next = THEMES[(THEMES.indexOf(readTheme()) + 1) % THEMES.length];
+    applyTheme(next);
+  });
+  applyTheme(readTheme());
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      if (network) { restyle(); }
+    });
+  }
+
+  // --- Tabs ----------------------------------------------------------------
+  var tabs = ["details", "classes", "table"];
+  function showTab(name) {
+    tabs.forEach(function (t) {
+      $("tab-" + t).setAttribute("aria-selected", String(t === name));
+      $("panel-" + t).hidden = t !== name;
+    });
+  }
+  tabs.forEach(function (t) { $("tab-" + t).addEventListener("click", function () { showTab(t); }); });
+
+  // --- Details -------------------------------------------------------------
+  function linkTo(node) {
+    var b = el("button", node.label, "link");
+    b.type = "button";
+    b.addEventListener("click", function () { select(node.id, true); });
+    return b;
+  }
+  function section(panel, title, items) {
+    if (!items.length) { return; }
+    panel.appendChild(el("h3", title));
+    var ul = el("ul", null, "plain");
+    items.forEach(function (parts) {
+      var li = el("li");
+      parts.forEach(function (p) { li.appendChild(typeof p === "string" ? el("span", p, p === "→" ? "arrow" : null) : p); });
+      ul.appendChild(li);
+    });
+    panel.appendChild(ul);
+  }
+  function showDetails(id) {
+    var n = byId[id], panel = $("panel-details");
+    panel.replaceChildren();
+    panel.appendChild(el("h2", n.label));
+    panel.appendChild(el("div", n.kind === "classe"
+      ? "Classe · " + n.instances + " entité" + (n.instances > 1 ? "s" : "")
+      : "Entité", "kind"));
+    if (n.description) { panel.appendChild(el("p", n.description)); }
+    if (n.parents.length > 1) {
+      panel.appendChild(el("p", "Plusieurs parents : vérifiez lesquels sont justes.", "warn"));
+    }
+    var named = function (names, lookup) {
+      return names.map(function (name) { return [lookup[name] ? linkTo(lookup[name]) : name]; });
+    };
+    section(panel, n.parents.length > 1 ? "Parents" : "Parent", named(n.parents, classByName));
+    section(panel, "Sous-classes", named(children[n.label] || [], classByName));
+    section(panel, "Types", named(n.types, classByName));
+    section(panel, "Attributs", Object.keys(n.attributes).map(function (k) {
+      return [k + " : " + n.attributes[k].join(", ")];
+    }));
+    var out = [], inc = [];
+    relations.forEach(function (e) {
+      if (e.from === id) { out.push([e.label, "→", linkTo(byId[e.to])]); }
+      if (e.to === id) { inc.push([linkTo(byId[e.from]), "→", e.label]); }
+    });
+    section(panel, "Relations sortantes", out);
+    section(panel, "Relations entrantes", inc);
+    if (n.kind === "classe") {
+      var members = data.nodes.filter(function (m) {
+        return m.kind === "entite" && m.types.indexOf(n.label) >= 0;
+      });
+      section(panel, "Entités de cette classe", members.map(function (m) { return [linkTo(m)]; }));
+    }
+  }
+
+  // --- Class tree ----------------------------------------------------------
+  function treeItem(name, path) {
+    var n = classByName[name], li = el("li"), row = el("div", null, "row");
+    var b = el("button", name, "link");
+    b.type = "button";
+    b.addEventListener("click", function () { showDetails(n.id); highlightFamily(name); });
+    row.appendChild(b);
+    row.appendChild(el("span", String(n.instances), "count"));
+    if (n.parents.length > 1) { row.appendChild(el("span", "plusieurs parents", "flag")); }
+    li.appendChild(row);
+    var kids = (children[name] || []).filter(function (c) { return path.indexOf(c) < 0; });
+    if (kids.length) {
+      var ul = el("ul");
+      kids.sort().forEach(function (c) { ul.appendChild(treeItem(c, path.concat([c]))); });
+      li.appendChild(ul);
+    }
+    return li;
+  }
+  var treeRoot = el("ul");
+  Object.keys(classByName).filter(function (name) { return !classByName[name].parents.length; })
+    .sort().forEach(function (name) { treeRoot.appendChild(treeItem(name, [name])); });
+  $("tree").appendChild(treeRoot);
+
+  // --- Table ---------------------------------------------------------------
+  function fillTable(filter) {
+    var needle = (filter || "").trim().toLowerCase();
+    var keep = function (cells) {
+      return !needle || cells.some(function (c) { return c.toLowerCase().indexOf(needle) >= 0; });
+    };
+    var rel = $("rows-relations"), att = $("rows-attributes");
+    rel.replaceChildren();
+    att.replaceChildren();
+    relations.forEach(function (e) {
+      var cells = [byId[e.from].label, e.label, byId[e.to].label];
+      if (!keep(cells)) { return; }
+      var tr = el("tr");
+      cells.forEach(function (c) { tr.appendChild(el("td", c)); });
+      tr.addEventListener("click", function () { select(e.from, true, true); });
+      rel.appendChild(tr);
+    });
+    attributeRows.forEach(function (row) {
+      var cells = [row[0].label, row[1], row[2]];
+      if (!keep(cells)) { return; }
+      var tr = el("tr");
+      cells.forEach(function (c) { tr.appendChild(el("td", c)); });
+      tr.addEventListener("click", function () { select(row[0].id, true, true); });
+      att.appendChild(tr);
+    });
+  }
+  fillTable("");
+  $("table-filter").addEventListener("input", function (ev) { fillTable(ev.target.value); });
+
+  // --- Graph ---------------------------------------------------------------
+  var network = null, nodes = null, edges = null, focus = null;
+  var physicsOn = false, hierarchical = false;
+  function css() {
+    var s = getComputedStyle(root);
+    var v = function (name) { return s.getPropertyValue(name).trim(); };
+    return { surface: v("--surface"), text: v("--text"), text2: v("--text-2"), edge: v("--edge"),
+      cls: v("--class"), entity: v("--entity"), onFill: v("--on-fill"), font: v("--font") };
+  }
+  function fade(color, alpha) {
+    var hex = color.replace("#", "");
+    if (hex.length !== 6) { return color; }
+    var n = parseInt(hex, 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + alpha + ")";
+  }
+  function tooltip(n) {
+    var box = el("div");
+    box.appendChild(el("strong", n.label));
+    box.appendChild(el("div", n.kind === "classe" ? "Classe" : "Entité" +
+      (n.types.length ? " · " + n.types.join(", ") : "")));
+    return box;
+  }
+  function nodeStyle(n, c) {
+    var dim = focus && !focus[n.id];
+    var hidden = n.kind === "classe" ? !$("show-classes").checked : !$("show-entities").checked;
+    if (n.kind === "classe") {
+      var multi = n.parents.length > 1;
+      return { id: n.id, label: (multi ? "⚠ " : "") + n.label, shape: "box", hidden: hidden,
+        opacity: dim ? 0.15 : 1, margin: 8, borderWidth: multi ? 2 : 1,
+        shapeProperties: { borderDashes: multi ? [5, 3] : false, borderRadius: 4 },
+        color: { background: c.cls, border: multi ? c.text : c.cls,
+          highlight: { background: c.cls, border: c.text }, hover: { background: c.cls, border: c.text } },
+        font: { color: dim ? fade(c.onFill, 0.5) : c.onFill, face: c.font, size: 14 }, title: tooltip(n) };
+    }
+    return { id: n.id, label: n.label, shape: "dot", size: 9, hidden: hidden,
+      opacity: dim ? 0.15 : 1, borderWidth: 2,
+      color: { background: c.entity, border: c.surface,
+        highlight: { background: c.entity, border: c.text }, hover: { background: c.entity, border: c.text } },
+      font: { color: dim ? fade(c.text, 0.25) : c.text, face: c.font, size: 13, strokeWidth: 3,
+        strokeColor: c.surface }, title: tooltip(n) };
+  }
+  function edgeStyle(e, i, c) {
+    var dim = focus && !(focus[e.from] && focus[e.to]);
+    var labels = $("show-labels").checked;
+    var style = { id: "x" + i, from: e.from, to: e.to, width: 1.5,
+      arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+      color: { color: c.edge, highlight: c.text, hover: c.text, opacity: dim ? 0.12 : 1 },
+      font: { color: dim ? fade(c.text2, 0.2) : c.text2, face: c.font, size: 11, strokeWidth: 3,
+        strokeColor: c.surface } };
+    if (e.kind === "relation") { style.label = labels ? e.label : undefined; }
+    if (e.kind === "est_un") { style.dashes = [6, 4]; style.label = labels ? "est_un" : undefined; }
+    if (e.kind === "type") { style.dashes = [2, 4]; style.hidden = !$("show-types").checked; }
+    return style;
+  }
+  function restyle() {
+    var c = css();
+    nodes.update(data.nodes.map(function (n) { return nodeStyle(n, c); }));
+    edges.update(data.edges.map(function (e, i) { return edgeStyle(e, i, c); }));
+  }
+  function setFocus(ids) {
+    focus = ids;
+    if (network) { restyle(); }
+  }
+  function neighbourhood(id) {
+    var ids = {};
+    ids[id] = true;
+    data.edges.forEach(function (e) {
+      if (e.from === id) { ids[e.to] = true; }
+      if (e.to === id) { ids[e.from] = true; }
+    });
+    return ids;
+  }
+  function highlightFamily(name) {
+    var family = descendants(name), ids = {};
+    data.nodes.forEach(function (n) {
+      if ((n.kind === "classe" && family[n.label]) ||
+          (n.kind === "entite" && n.types.some(function (t) { return family[t]; }))) { ids[n.id] = true; }
+    });
+    setFocus(ids);
+    if (network) {
+      network.selectNodes([classByName[name].id]);
+      network.fit({ nodes: Object.keys(ids), animation: true });
+    }
+  }
+  function select(id, move, stayOnTab) {
+    showDetails(id);
+    if (!stayOnTab) { showTab("details"); }
+    setFocus(neighbourhood(id));
+    if (network) {
+      network.selectNodes([id]);
+      if (move) { network.focus(id, { scale: 1.1, animation: true }); }
+    }
+  }
+  function clearSelection() {
+    setFocus(null);
+    if (network) { network.unselectAll(); }
+  }
+
+  $("search").addEventListener("change", function (ev) {
+    var wanted = ev.target.value.trim().toLowerCase();
+    if (!wanted) { return; }
+    var found = data.nodes.find(function (n) { return n.label.toLowerCase() === wanted; }) ||
+      data.nodes.find(function (n) { return n.label.toLowerCase().indexOf(wanted) >= 0; });
+    if (found) { select(found.id, true); }
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") { clearSelection(); }
+  });
+
+  if (typeof vis === "undefined") {
+    document.querySelector(".graph-wrap").appendChild(el("div", "Le graphe n'a pas pu être chargé (connexion Internet requise). " +
+      "Les onglets Classes et Tableau restent utilisables.", "notice"));
+    showTab("classes");
+    return;
+  }
+
+  var c0 = css();
+  nodes = new vis.DataSet(data.nodes.map(function (n) { return nodeStyle(n, c0); }));
+  edges = new vis.DataSet(data.edges.map(function (e, i) { return edgeStyle(e, i, c0); }));
+  var NETWORK = { hierarchical: { enabled: false } };
+  var TREE = { hierarchical: { enabled: true, direction: "DU", sortMethod: "directed",
+    levelSeparation: 120, nodeSpacing: 260, treeSpacing: 280 } };
+  function createNetwork(tree) {
+    if (network) { network.destroy(); }
+    network = new vis.Network($("graph"), { nodes: nodes, edges: edges }, {
+      layout: tree ? TREE : NETWORK,
+      physics: { enabled: true, stabilization: { iterations: 400 },
+        solver: tree ? "hierarchicalRepulsion" : "forceAtlas2Based" },
+      interaction: { hover: true, keyboard: { enabled: true, bindToWindow: false }, tooltipDelay: 150 },
+      edges: { smooth: tree ? { type: "cubicBezier", forceDirection: "vertical" } : { type: "continuous" } }
+    });
+    network.once("stabilizationIterationsDone", function () {
+      if (!physicsOn) { network.setOptions({ physics: { enabled: false } }); }
+      network.fit();
+    });
+    network.on("click", function (params) {
+      if (params.nodes.length) { select(params.nodes[0], false); }
+      else if (!params.edges.length) { clearSelection(); }
+    });
+  }
+  createNetwork(false);
+
+  ["show-classes", "show-entities", "show-types", "show-labels"].forEach(function (id) {
+    $(id).addEventListener("change", restyle);
+  });
+  function setLayout(tree) {
+    hierarchical = tree;
+    $("layout-network").setAttribute("aria-pressed", String(!tree));
+    $("layout-tree").setAttribute("aria-pressed", String(tree));
+    // A fresh network: the options one layout leaves behind spoil the other.
+    createNetwork(tree);
+  }
+  $("layout-network").addEventListener("click", function () { setLayout(false); });
+  $("layout-tree").addEventListener("click", function () { setLayout(true); });
+  $("fit").addEventListener("click", function () { network.fit({ animation: true }); });
+  $("physics").addEventListener("click", function () {
+    physicsOn = !physicsOn;
+    $("physics").setAttribute("aria-pressed", String(physicsOn));
+    network.setOptions({ physics: { enabled: physicsOn,
+      solver: hierarchical ? "hierarchicalRepulsion" : "forceAtlas2Based" } });
+  });
+  $("png").addEventListener("click", function () {
+    var source = $("graph").querySelector("canvas");
+    var out = document.createElement("canvas");
+    out.width = source.width;
+    out.height = source.height;
+    var ctx = out.getContext("2d");
+    ctx.fillStyle = css().surface;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(source, 0, 0);
+    var link = document.createElement("a");
+    link.download = (document.title || "ontologie") + ".png";
+    link.href = out.toDataURL("image/png");
+    link.click();
+  });
+})();
+</script>
+</body>
+</html>

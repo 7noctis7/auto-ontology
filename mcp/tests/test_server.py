@@ -277,3 +277,16 @@ def test_refuses_to_start_when_a_curated_endpoint_disappeared(tmp_path: Path) ->
 
     with pytest.raises(ConfigError, match="GET /api/terms"):
         load_spec(_settings(trimmed))
+
+
+def test_annotations_tell_clients_what_each_tool_may_change() -> None:
+    # Without annotations a client must assume a tool may destroy data, and
+    # asks for approval on every glossary lookup.
+    tools = {tool.name: tool.annotations for tool in _tools()}
+
+    for name, hints in tools.items():
+        assert hints is not None, name
+        assert hints.destructiveHint is False, name
+        assert hints.title, name
+    read_only = {name for name, a in tools.items() if a.readOnlyHint}
+    assert read_only == set(tools) - {"ask_question"}  # it records a turn

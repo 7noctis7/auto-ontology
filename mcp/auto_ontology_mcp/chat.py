@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from auto_ontology_mcp.config import Settings
@@ -151,6 +152,17 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
 
     @mcp.tool(
         name="ask_question",
+        title="Ask a question",
+        # Not read-only: each call records a conversation turn (the API asks
+        # for conversation-write permission). It never changes the connected
+        # data, so it is not destructive; and two calls are two turns.
+        annotations=ToolAnnotations(
+            title="Ask a question",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
         description=(
             "Ask a natural-language question about the data connected to this "
             "Auto Ontology deployment. Auto Ontology resolves the question against its semantic "

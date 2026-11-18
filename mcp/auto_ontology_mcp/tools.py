@@ -38,6 +38,18 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastmcp.server.providers.openapi import MCPType, RouteMap
+from mcp.types import ToolAnnotations
+
+# Every curated operation reads. Said explicitly because a client that sees no
+# annotations must assume the MCP defaults, which are "may write" and "may be
+# destructive", and would then ask for approval on every glossary lookup. The
+# server only ever talks to this deployment, hence no open world.
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +60,7 @@ class ToolSpec:
     path: str
     name: str
     description: str
+    title: str = ""
 
 
 # Ordered roughly as an agent would work: understand the vocabulary, then ask.
@@ -62,6 +75,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/terms",
         name="search_terms",
+        title="Search the glossary",
         description=(
             "Search the business glossary. Terms are the human-meaningful "
             "concepts Auto Ontology has compiled over the connected databases — "
@@ -75,6 +89,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/terms/{term_id}",
         name="get_term",
+        title="Get a term",
         description=(
             "Fetch one glossary term: its description, synonyms, and the "
             "terms related to it. Use after search_terms to confirm a term "
@@ -85,6 +100,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/terms/{term_id}/column-attributes",
         name="get_term_columns",
+        title="Columns of a term",
         description=(
             "List the physical table columns a glossary term maps to. This is "
             "how you get from a business concept to the data behind it."
@@ -94,6 +110,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/terms/{term_id}/sql-attributes",
         name="get_term_sql_attributes",
+        title="SQL attributes of a term",
         description=(
             "List the SQL attributes defined under a glossary term — reviewed "
             "SQL expressions such as a margin, a ratio, or a rolling total. "
@@ -105,6 +122,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/sql-attributes/{attr_id}",
         name="get_sql_attribute",
+        title="Get a SQL attribute",
         description=(
             "Fetch one SQL attribute: its expression, the term it belongs to, "
             "and what it is for."
@@ -114,6 +132,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="GET",
         path="/api/exploration/tables/{table_id}/details",
         name="describe_table",
+        title="Describe a table",
         description=(
             "Describe what one table means: the glossary terms that map to it, "
             "and the stored queries from query history that reference it."
@@ -123,6 +142,7 @@ CURATED: tuple[ToolSpec, ...] = (
         method="POST",
         path="/api/question-entity-coverage",
         name="check_answerable",
+        title="Check a question is answerable",
         description=(
             "Grade how well the semantic layer covers the entities in a "
             "question, without running the full agent. A cheap pre-flight: "
@@ -209,17 +229,24 @@ def apply_description(route: Any, component: Any) -> None:
     """Replace a generated component's description with the curated one.
 
     Shaped as a FastMCP ``ComponentFn``: called once per generated component
-    and mutates it in place.
+    and mutates it in place. It also sets the title and the read-only
+    annotations, which the spec cannot express.
     """
     spec = _by_route().get(
         (str(getattr(route, "method", "")).upper(), getattr(route, "path", ""))
     )
     if spec is not None:
         component.description = spec.description
+        component.annotations = READ_ONLY.model_copy(
+            update={"title": spec.title or None}
+        )
+        if spec.title:
+            component.title = spec.title
 
 
 __all__ = [
     "CURATED",
+    "READ_ONLY",
     "ToolSpec",
     "apply_description",
     "missing_from_spec",
