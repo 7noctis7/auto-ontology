@@ -107,6 +107,8 @@
         ]));
       });
     }
+    root.append(playbookSection(state));
+    root.append(rulesSection(state));
     var tables = state.datasets || [];
     if (tables.length) {
       root.append(el("h3", {}, [lang() === "fr" ? "Tables" : "Tables"]));
@@ -302,6 +304,105 @@
     return root;
   }
 
+  function fr(french, english) { return lang() === "fr" ? french : english; }
+
+  function readBody(response) {
+    return response.json().then(function (body) {
+      if (!response.ok) throw new Error(body.detail || body.message || response.statusText);
+      return body;
+    });
+  }
+
+  /* The project's kind of work: guided extraction and checks. */
+  function playbookSection(state) {
+    var box = el("section", { class: "stack" }, [
+      el("h3", {}, ["Playbook"]),
+      el("p", { class: "muted" }, [fr(
+        "Le métier du projet guide les prochaines extractions et ajoute des contrôles (échéances, parties, responsables).",
+        "The project's kind of work guides the next extractions and adds checks (deadlines, parties, owners)."
+      )])
+    ]);
+    var select = el("select", { "aria-label": "Playbook" }, [
+      el("option", { value: "" }, [fr("Aucun", "None")])
+    ]);
+    var results = el("div", { class: "stack" }, []);
+    var run = el("button", { type: "button" }, [fr("Vérifier", "Run checks")]);
+    // A property, not an attribute: disabled="false" would still disable it.
+    run.disabled = !state.playbook;
+    select.addEventListener("change", function () {
+      fetch("/api/v1/playbook", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: select.value })
+      }).then(readBody).then(function (body) { ui().replace(body); })
+        .catch(function (error) { results.replaceChildren(el("p", { class: "bad" }, [error.message])); });
+    });
+    run.addEventListener("click", function () {
+      results.replaceChildren(el("p", { class: "muted" }, ["…"]));
+      fetch("/api/v1/check").then(readBody).then(function (report) {
+        var list = el("ul", { class: "findings" }, (report.findings || []).map(function (item) {
+          return el("li", { class: item.severity === "haute" ? "bad" : "" }, [
+            el("strong", {}, [item.title]),
+            " — " + item.entity + " : " + item.detail + (item.document ? " (" + item.document + ")" : "")
+          ]);
+        }));
+        var items = [el("p", {}, [report.summary]), list];
+        (report.errors || []).forEach(function (text) {
+          items.push(el("p", { class: "muted" }, [text]));
+        });
+        results.replaceChildren.apply(results, items);
+      }).catch(function (error) { results.replaceChildren(el("p", { class: "bad" }, [error.message])); });
+    });
+    fetch("/api/v1/playbooks").then(readBody).then(function (body) {
+      body.playbooks.forEach(function (item) {
+        var option = el("option", { value: item.id }, [item.name + " (" + item.checks + ")"]);
+        if (item.id === (state.playbook || body.active)) option.selected = true;
+        select.append(option);
+      });
+    }).catch(function () { /* an empty studio has no project yet */ });
+    box.append(el("div", { class: "inline-row" }, [select, run]), results);
+    return box;
+  }
+
+  /* Rules and decisions the team certified; agents add them via MCP. */
+  function rulesSection(state) {
+    var box = el("section", { class: "stack" }, [
+      el("h3", {}, [fr("Règles et décisions", "Rules and decisions")])
+    ]);
+    var rules = state.rules || [];
+    if (!rules.length) {
+      box.append(el("p", { class: "muted" }, [fr(
+        "Aucune règle certifiée. Une règle est énoncée, pas extraite : « un contrat de plus de 50 k€ demande deux signatures ».",
+        "No certified rule. A rule is stated, not extracted: \"a contract over 50k needs two signatures\"."
+      )]));
+    }
+    rules.forEach(function (rule) {
+      box.append(el("p", {}, [
+        rule.text + (rule.source ? " — " + rule.source : "") + (rule.actor === "mcp" ? " (agent)" : ""),
+        el("button", { type: "button", title: fr("Retirer", "Retire"), onclick: function () {
+          fetch("/api/v1/rules/" + encodeURIComponent(rule.id), { method: "DELETE" })
+            .then(readBody).then(function () { return ui().refresh(); });
+        } }, ["×"])
+      ]));
+    });
+    var form = el("form", { class: "ask", onsubmit: function (event) {
+      event.preventDefault();
+      var inputs = event.target.querySelectorAll("input");
+      fetch("/api/v1/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: inputs[0].value, source: inputs[1].value })
+      }).then(readBody).then(function () { return ui().refresh(); })
+        .catch(function (error) { box.append(el("p", { class: "bad" }, [error.message])); });
+    } }, [
+      el("input", { type: "text", required: true, placeholder: fr("La règle, en une phrase", "The rule, in one sentence") }),
+      el("input", { type: "text", placeholder: fr("Source (réunion, document)", "Source (meeting, document)") }),
+      el("button", { type: "submit" }, [fr("Certifier", "Certify")])
+    ]);
+    box.append(form);
+    return box;
+  }
+
   function guide() {
     var root = el("div", { class: "stack guide" }, [
       el("h2", {}, [lang() === "fr" ? "Mode d'emploi" : "Guide"])
@@ -341,7 +442,7 @@
     }
     root.append(el("h3", {}, [lang() === "fr" ? "Depuis le terminal" : "From the terminal"]));
     root.append(el("pre", {}, [
-      "uv run ontology serve\nuv run ontology import a.pdf b.epub --fake\nuv run ontology ask \"qui dirige la bibliothèque\"\nuv run ontology mcp"
+      "uv run ontology open ~/Dossier --playbook audit-contrats\nuv run ontology brief\nuv run ontology check\nuv run ontology ask \"qui dirige la bibliothèque\"\nuv run ontology ask \"budget par directeur\" --data\nuv run ontology mcp --allow-writes"
     ]));
     return root;
   }

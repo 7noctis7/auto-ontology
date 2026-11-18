@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: base-connaissances
+name: Base de connaissances projet
+description: >-
+  Qui fait quoi, ce qui a été décidé et ce qui reste à faire dans un projet,
+  à partir des notes, des e-mails et des comptes rendus.
+focus: |
+  Relève les personnes et leur rôle, les équipes, les décisions (qui décide
+  quoi, quand), les actions (qui doit faire quoi, pour quand), les
+  livrables, les jalons, les risques et les dépendances entre sujets. Écris
+  les dates telles quelles (2026-12-15 ou 15/12/2026). Une décision devient
+  une relation « decide » ou « valide » ; une action, « doit_livrer » ou
+  « est_charge_de », avec une échéance en attribut.
+classes: [Personne, Equipe, Projet, Decision, Action, Livrable, Jalon, Risque]
+predicates:
+  - decide
+  - valide
+  - est_charge_de
+  - doit_livrer
+  - depend_de
+  - participe_a
+  - menace
+questions:
+  - Qui est responsable de chaque livrable ?
+  - Quelles décisions ont été prises ce mois-ci ?
+  - Quelles actions sont en retard ?
+checks:
+  - id: action-sans-responsable
+    title: Action ou livrable sans responsable
+    kind: missing_relation
+    severity: haute
+    classes: [Action, Livrable]
+    predicates: [est_charge_de, doit_livrer, est_assigne_a, a_pour_responsable, porte]
+    advice: Une action sans responsable n'avance pas.
+  - id: action-sans-echeance
+    title: Action sans échéance
+    kind: missing_attribute
+    severity: moyenne
+    classes: [Action, Livrable, Jalon]
+    attributes: [echeance, date_echeance, date_limite, date, deadline, due_date]
+  - id: jalon-proche
+    title: Jalon ou échéance dans les 14 jours
+    kind: date_within
+    severity: moyenne
+    days: 14
+    attributes: [echeance, date_echeance, date_limite, deadline, due_date, date_jalon]
+  - id: en-retard
+    title: Échéance dépassée
+    kind: date_past
+    severity: haute
+    attributes: [echeance, date_echeance, date_limite, deadline, due_date, date_jalon]
+    advice: Relancer le responsable ou replanifier.
+  - id: risque-sans-parade
+    title: Risque sans parade
+    kind: missing_relation
+    severity: basse
+    classes: [Risque]
+    predicates: [est_attenue_par, a_pour_parade, est_traite_par, mitigation]

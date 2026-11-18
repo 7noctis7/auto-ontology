@@ -292,6 +292,8 @@ class Project(BaseModel):
     notes: list[NoteLink] = Field(default_factory=list)
     datasets: list[DatasetRecord] = Field(default_factory=list)
     rules: list[BusinessRule] = Field(default_factory=list)
+    # The id of the playbook the project follows (see playbooks.py), or "".
+    playbook: str = ""
     questions: list[CompetencyQuestion] = Field(default_factory=list)
     mappings: list[VocabularyMapping] = Field(default_factory=list)
     base_iri: str = ""

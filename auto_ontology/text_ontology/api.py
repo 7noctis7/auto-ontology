@@ -161,6 +161,10 @@ class SqlBody(BaseModel):
     limit: int = Field(default=200, ge=1, le=5000)
 
 
+class PlaybookBody(BaseModel):
+    id: str = Field(default="", max_length=64)
+
+
 class RuleBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
     rationale: str = Field(default="", max_length=2000)
@@ -476,9 +480,13 @@ def install_api(app: FastAPI) -> None:
             moment = parse_since(since)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        from auto_ontology.text_ontology.playbooks import playbook_alerts
+
         studio, project = _studio(request)
-        journal = read_journal(studio.store.project_dir(project.id), moment)
-        result = brief(project, moment, journal)
+        folder = studio.store.project_dir(project.id)
+        journal = read_journal(folder, moment)
+        alerts = playbook_alerts(project, studio.store.home, folder)
+        result = brief(project, moment, journal, alerts)
         return {**result.as_dict(), "markdown": result.markdown()}
 
     @app.get("/api/v1/diff")
@@ -493,6 +501,60 @@ def install_api(app: FastAPI) -> None:
         studio, project = _studio(request)
         result = diff(project, studio.store.project_dir(project.id), moment)
         return {**result.as_dict(), "markdown": result.markdown()}
+
+    @app.get("/api/v1/playbooks")
+    def get_playbooks(request: Request) -> dict[str, Any]:
+        """Playbooks available (bundled and the person's), and the project's."""
+        from auto_ontology.text_ontology.app.server import _open_project
+        from auto_ontology.text_ontology.playbooks import available
+
+        studio = request.app.state.studio
+        project = _open_project(studio)
+        return {
+            "active": project.playbook if project else "",
+            "playbooks": [
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "description": item.description,
+                    "checks": len(item.checks),
+                    "questions": item.questions,
+                    "origin": item.origin,
+                }
+                for item in available(studio.store.home).values()
+            ],
+        }
+
+    @app.put("/api/v1/playbook")
+    def put_playbook(body: PlaybookBody, request: Request) -> dict[str, Any]:
+        """Choose the project's playbook ("" for none). Undoable."""
+        from auto_ontology.text_ontology.app.server import _view
+        from auto_ontology.text_ontology.playbooks import PlaybookError, get
+
+        _require_write(request)
+        studio, project = _studio(request)
+        try:
+            project.playbook = get(body.id, studio.store.home).id if body.id else ""
+        except PlaybookError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        studio.store.save(project, snapshot=True)
+        return _view(studio)
+
+    @app.get("/api/v1/check")
+    def get_check(request: Request, playbook: str | None = None) -> dict[str, Any]:
+        """The checks of the project's playbook (or *playbook*), with findings."""
+        from auto_ontology.text_ontology.playbooks import PlaybookError, get, run_checks
+
+        studio, project = _studio(request)
+        wanted = playbook or project.playbook
+        if not wanted:
+            raise HTTPException(status_code=409, detail="Aucun playbook choisi.")
+        try:
+            chosen = get(wanted, studio.store.home)
+        except PlaybookError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        report = run_checks(project, chosen, studio.store.project_dir(project.id))
+        return {**report.as_dict(), "markdown": report.markdown()}
 
     @app.get("/api/v1/rules")
     def get_rules(request: Request, include_retired: bool = False) -> dict[str, Any]:

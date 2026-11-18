@@ -78,6 +78,8 @@ STUDIO_COMMANDS = (
     "ask",
     "report",
     "rules",
+    "playbook",
+    "check",
     "mcp",
     "sdk",
 )
@@ -94,6 +96,8 @@ Studio commands (same entry point):
   ask      answer from the current project's facts, with sources
   report   meeting summary or comparison table, in Markdown, from the facts
   rules    business rules and decisions the team certified
+  playbook choose the project's kind of work (contracts, finance, knowledge)
+  check    run the playbook's checks (exit 1 on a high-priority finding)
   mcp      MCP server on standard input (confirmed writes: --allow-writes)
   sdk      write a Python client for the current project's schema
 

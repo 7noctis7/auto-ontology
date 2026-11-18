@@ -151,6 +151,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Ajoute remember_fact et certify_rule : chaque écriture demande un "
         "aperçu puis un jeton de confirmation, et s'annule depuis le studio.",
     )
+    playbook_parser = commands.add_parser(
+        "playbook",
+        help="Choisit le métier du projet courant (audit de contrats, suivi "
+        "financier, base de connaissances) : extraction guidée et contrôles.",
+    )
+    playbook_parser.add_argument(
+        "action", nargs="?", choices=["list", "use", "none", "show"], default="list"
+    )
+    playbook_parser.add_argument("id", nargs="?", default="")
+    playbook_parser.add_argument("--home", default=None)
+    check_parser = commands.add_parser(
+        "check", help="Lance les contrôles du playbook sur le projet courant."
+    )
+    check_parser.add_argument(
+        "--playbook", default=None, help="Un autre playbook que celui du projet."
+    )
+    check_parser.add_argument("--json", action="store_true")
+    check_parser.add_argument("--home", default=None)
     report_parser = commands.add_parser(
         "report",
         help="Rapport Markdown depuis les faits : compte rendu de réunion ou "
@@ -188,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     open_parser.add_argument("--port", type=int, default=None)
     open_parser.add_argument("--no-browser", action="store_true")
     open_parser.add_argument("--home", default=None)
+    open_parser.add_argument(
+        "--playbook", default=None, help="audit-contrats, suivi-financier…"
+    )
     open_parser.add_argument(
         "--fake", action="store_true", help="Sans modèle (démonstration)."
     )
@@ -278,6 +299,16 @@ def main(argv: list[str] | None = None) -> int:
         serve_mcp(
             Path(args.home) if args.home else None, allow_writes=args.allow_writes
         )
+    elif args.command == "playbook":
+        return manage_playbook(
+            args.action, args.id, home=Path(args.home) if args.home else None
+        )
+    elif args.command == "check":
+        return check_project(
+            args.playbook,
+            as_json=args.json,
+            home=Path(args.home) if args.home else None,
+        )
     elif args.command == "report":
         return write_report(
             args.kind,
@@ -314,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
             open_browser=not args.no_browser,
             home=Path(args.home) if args.home else None,
             fake=args.fake,
+            playbook=args.playbook,
         )
     return 0
 
@@ -334,14 +366,100 @@ def daily_report(kind: str, *, since: str, as_json: bool, home: Path | None) -> 
         return 2
     from auto_ontology.text_ontology.inbox import read_journal
 
+    from auto_ontology.text_ontology.playbooks import playbook_alerts
+
     folder = store.project_dir(project.id)  # type: ignore[attr-defined]
     report = (
-        brief(project, moment, read_journal(folder, moment))  # type: ignore[arg-type]
+        brief(
+            project,  # type: ignore[arg-type]
+            moment,
+            read_journal(folder, moment),
+            playbook_alerts(project, store.home, folder),  # type: ignore[arg-type, attr-defined]
+        )
         if kind == "brief"
         else diff(project, store.project_dir(project.id), moment)  # type: ignore[arg-type, attr-defined]
     )
     sys.stdout.write(to_json(report.as_dict()) if as_json else report.markdown())
     return 0
+
+
+def manage_playbook(action: str, playbook_id: str, *, home: Path | None) -> int:
+    """``ontology playbook [list|use ID|none|show ID]``."""
+    from auto_ontology.text_ontology.playbooks import PlaybookError, available, get
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    store = ProjectStore(home or default_home())
+    project = store.current()
+    try:
+        if action == "show":
+            wanted = playbook_id or (project.playbook if project else "")
+            playbook = get(wanted, store.home)
+            print(f"{playbook.name} ({playbook.id}, {playbook.origin})")
+            print(playbook.description)
+            print("\nExtraction :\n" + playbook.guidance())
+            print("\nContrôles :")
+            for check in playbook.checks:
+                print(f"- [{check.severity}] {check.title}")
+            if playbook.questions:
+                print("\nQuestions :")
+                print("\n".join(f"- {q}" for q in playbook.questions))
+            return 0
+        if action in {"use", "none"}:
+            chosen = get(playbook_id, store.home) if action == "use" else None
+            if project is None:
+                project = store.create("Nouveau projet")
+            project.playbook = chosen.id if chosen else ""
+            store.save(project, snapshot=True)
+            if chosen is None:
+                print(f"« {project.name} » ne suit plus de playbook.")
+            else:
+                print(
+                    f"« {project.name} » suit maintenant « {chosen.name} ». Les "
+                    "prochains imports en tiennent compte ; ontology check lance "
+                    "les contrôles."
+                )
+            return 0
+    except PlaybookError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    current = project.playbook if project else ""
+    for playbook in available(store.home).values():
+        mark = "*" if playbook.id == current else " "
+        print(
+            f"{mark} {playbook.id:<20} {playbook.name} — "
+            f"{len(playbook.checks)} contrôles"
+        )
+    if not current:
+        print("\nAucun playbook choisi : ontology playbook use <id>")
+    return 0
+
+
+def check_project(playbook_id: str | None, *, as_json: bool, home: Path | None) -> int:
+    """``ontology check``: the playbook's checks; exit 1 when one is high."""
+    from auto_ontology.text_ontology.daily import as_json as to_json
+    from auto_ontology.text_ontology.playbooks import PlaybookError, get, run_checks
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    store, project = found
+    wanted = playbook_id or project.playbook  # type: ignore[attr-defined]
+    if not wanted:
+        print(
+            "error: aucun playbook pour ce projet. ontology playbook use <id>, "
+            "ou ontology check --playbook <id>.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        playbook = get(wanted, store.home)  # type: ignore[attr-defined]
+    except PlaybookError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    folder = store.project_dir(project.id)  # type: ignore[attr-defined]
+    report = run_checks(project, playbook, folder)  # type: ignore[arg-type]
+    sys.stdout.write(to_json(report.as_dict()) if as_json else report.markdown())
+    return 1 if report.counts()["haute"] else 0
 
 
 def write_report(
@@ -526,6 +644,7 @@ def open_folder(
     open_browser: bool = True,
     home: Path | None = None,
     fake: bool = False,
+    playbook: str | None = None,
 ) -> int:
     """``ontology open <folder>``: one command from a folder to a studio.
 
@@ -540,8 +659,20 @@ def open_folder(
         print(f"Dossier introuvable : {folder}", file=sys.stderr)
         return 1
     root = Path(home) if home is not None else default_home()
-    project = ProjectStore(root).open_named(folder.name)
+    store = ProjectStore(root)
+    project = store.open_named(folder.name)
+    if playbook:
+        from auto_ontology.text_ontology.playbooks import PlaybookError, get
+
+        try:
+            project.playbook = get(playbook, root).id
+        except PlaybookError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        store.save(project)
     print(f"Projet « {project.name} » — dossier surveillé : {folder}")
+    if project.playbook:
+        print(f"Playbook : {project.playbook}")
     serve(
         port=port,
         open_browser=open_browser,

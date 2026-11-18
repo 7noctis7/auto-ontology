@@ -529,3 +529,7 @@ select, textarea {
   padding: 6px 10px; border-radius: 6px; font-size: 12px;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line);
 }
+
+.inline-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.findings { margin: 0; padding-left: 1.2rem; }
+.findings li { margin: 0.3rem 0; line-height: 1.4; }

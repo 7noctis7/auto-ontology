@@ -153,12 +153,18 @@ class Brief:
         return "\n".join(lines) + "\n"
 
 
-def brief(project: Project, since: datetime, journal: Sequence[Outcome] = ()) -> Brief:
+def brief(
+    project: Project,
+    since: datetime,
+    journal: Sequence[Outcome] = (),
+    extra_alerts: Sequence[str] = (),
+) -> Brief:
     """What *project* gained since *since*, and what deserves a look.
 
     *journal* is the activity journal from *since* on (see
     :func:`inbox.read_journal`): it adds what was skipped or failed, which
-    the project itself does not remember.
+    the project itself does not remember. *extra_alerts* come first (the
+    playbook's findings, see :func:`playbooks.playbook_alerts`).
     """
     new_documents = [
         d for d in project.documents if (_moment(d.added_at) or since) >= since
@@ -211,6 +217,7 @@ def brief(project: Project, since: datetime, journal: Sequence[Outcome] = ()) ->
             for entry in journal
             if entry.kind in {"error", "skipped"}
         ),
+        *extra_alerts,
         *_alerts(project),
     ]
     result.duplicates = list(

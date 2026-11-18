@@ -477,6 +477,10 @@ def build_view(
         "action_log": [item.model_dump() for item in project.action_log[-30:]],
         "notes": [item.model_dump() for item in project.notes],
         "datasets": [item.model_dump() for item in project.datasets],
+        "playbook": project.playbook,
+        "rules": [
+            item.model_dump() for item in project.rules if item.status == "certified"
+        ],
         "standards": {
             "checks": [item.model_dump() for item in shacl_checks(project)],
             "alignments": alignment_suggestions(project),

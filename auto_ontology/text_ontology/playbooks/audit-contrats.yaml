@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: audit-contrats
+name: Audit de contrats
+description: >-
+  Parties, objet, montants, durées et échéances d'un portefeuille de
+  contrats, pour repérer ce qui expire, ce qui se renouvelle seul et ce qui
+  manque.
+focus: |
+  Pour chaque contrat, relève : les parties (qui signe avec qui), l'objet,
+  la date de signature, la date d'effet, la date d'échéance ou la durée, le
+  montant et sa périodicité, le préavis de résiliation, le renouvellement
+  tacite, les pénalités et la juridiction. Écris les dates telles quelles
+  (31/03/2027 ou 2027-03-31) et les montants avec leur unité (50 000 €).
+  Nomme chaque contrat par son intitulé ou « Contrat <partie> <objet> ».
+classes: [Contrat, Partie, Organisation, Personne, Clause]
+predicates:
+  - a_pour_partie
+  - signe
+  - porte_sur
+  - contient_clause
+  - est_regi_par
+questions:
+  - Quels contrats arrivent à échéance dans les 90 prochains jours ?
+  - Quels contrats se renouvellent tacitement ?
+  - Quel est le montant total engagé par partie ?
+checks:
+  - id: echeance-proche
+    title: Échéance dans les 90 jours
+    kind: date_within
+    severity: haute
+    days: 90
+    attributes: [date_echeance, date_fin, echeance, date_expiration, date_de_fin, end_date, expiration_date]
+    advice: Décider du renouvellement ou de la résiliation avant le préavis.
+  - id: echeance-depassee
+    title: Échéance dépassée
+    kind: date_past
+    severity: moyenne
+    attributes: [date_echeance, date_fin, echeance, date_expiration, date_de_fin, end_date, expiration_date]
+    advice: Vérifier si le contrat a été prolongé, renouvelé ou clos.
+  - id: sans-echeance
+    title: Contrat sans échéance ni durée
+    kind: missing_attribute
+    severity: moyenne
+    classes: [Contrat]
+    attributes: [date_echeance, date_fin, echeance, date_expiration, duree, date_de_fin, end_date, duration]
+    advice: Retrouver la clause de durée ; un contrat sans terme est souvent à durée indéterminée.
+  - id: sans-montant
+    title: Contrat sans montant
+    kind: missing_attribute
+    severity: basse
+    classes: [Contrat]
+    attributes: [montant, prix, valeur, montant_annuel, montant_total, redevance, amount, price]
+  - id: sans-partie
+    title: Contrat sans partie identifiée
+    kind: missing_relation
+    severity: haute
+    classes: [Contrat]
+    predicates: [a_pour_partie, signe, est_signe_par, lie, engage]
+  - id: renouvellement-tacite
+    title: Renouvellement tacite
+    kind: sql
+    severity: moyenne
+    sql: >-
+      SELECT entity, value, document FROM onto_attributes
+      WHERE key IN ('renouvellement', 'renouvellement_tacite', 'tacite_reconduction', 'reconduction')
+        AND lower(value) NOT IN ('non', 'false', 'no', 'aucun')
+    message: "renouvellement : {value}"
+    advice: Noter la date limite de dénonciation dans l'agenda.
+  - id: gros-montant
+    title: Montant supérieur à 100 000
+    kind: value_above
+    severity: basse
+    threshold: 100000
+    attributes: [montant, prix, valeur, montant_annuel, montant_total, amount, price]
+    advice: Vérifier la double signature et l'approbation de la direction.

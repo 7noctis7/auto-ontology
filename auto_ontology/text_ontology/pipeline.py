@@ -213,6 +213,16 @@ def _ingest_document(
     # Preview merges replace project.ontology but must keep the same base.
     known_classes = [cls.name for cls in base.classes]
     known_predicates = list(dict.fromkeys(item.predicate for item in base.triplets))
+    from auto_ontology.text_ontology.playbooks import active
+
+    playbook = active(project, store.home)
+    if playbook is not None:
+        # The playbook's vocabulary comes after the project's own names, so a
+        # spelling the project already uses still wins.
+        known_classes = list(dict.fromkeys([*known_classes, *playbook.classes]))
+        known_predicates = list(
+            dict.fromkeys([*known_predicates, *playbook.predicates])
+        )
     raw_chunks: list[RawChunk] = []
     cached_indexes: list[int] = []
     durations: list[float] = []
@@ -279,7 +289,14 @@ def _ingest_document(
             on_chunk=on_chunk,
             cancel_event=cancel_event,
             model_name=model_label,
-            preface=lessons_text(memory),
+            preface="\n\n".join(
+                part
+                for part in (
+                    playbook.guidance() if playbook is not None else "",
+                    lessons_text(memory),
+                )
+                if part
+            ),
         )
     except Exception:
         document.status = "failed"

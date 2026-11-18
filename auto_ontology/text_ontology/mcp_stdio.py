@@ -204,6 +204,14 @@ READ_TOOLS = (
         ("kind",),
     ),
     Tool(
+        "check_playbook",
+        "Run playbook checks",
+        "Run the checks of the project's playbook (contract audit, finance, "
+        "project knowledge): expiring dates, missing parties or owners, amounts "
+        "over a threshold. Each finding has its source document.",
+        {"playbook": _string("Another playbook id than the project's.")},
+    ),
+    Tool(
         "preview_action",
         "Preview a correction",
         "What a rename or a merge would change. Writes nothing.",
@@ -382,6 +390,7 @@ class StudioMcp:
             "describe_table": self._describe,
             "run_sql": self._sql,
             "export_report": self._report,
+            "check_playbook": self._check,
             "preview_action": self._preview_action,
             "remember_fact": self._remember,
             "certify_rule": self._certify,
@@ -471,8 +480,27 @@ class StudioMcp:
             moment = parse_since(str(a.get("since") or "24h"))
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
-        journal = read_journal(self.store.project_dir(project.id), moment)
-        report = brief(project, moment, journal)
+        from auto_ontology.text_ontology.playbooks import playbook_alerts
+
+        folder = self.store.project_dir(project.id)
+        alerts = playbook_alerts(project, self.store.home, folder)
+        report = brief(project, moment, read_journal(folder, moment), alerts)
+        return {**report.as_dict(), "markdown": report.markdown()}
+
+    def _check(self, project: Project, a: dict[str, Any]) -> object:
+        from auto_ontology.text_ontology.playbooks import PlaybookError, get, run_checks
+
+        wanted = str(a.get("playbook") or "") or project.playbook
+        if not wanted:
+            raise ToolError(
+                "Ce projet ne suit aucun playbook : passez playbook "
+                "(audit-contrats, suivi-financier, base-connaissances)."
+            )
+        try:
+            chosen = get(wanted, self.store.home)
+        except PlaybookError as exc:
+            raise ToolError(str(exc)) from exc
+        report = run_checks(project, chosen, self.store.project_dir(project.id))
         return {**report.as_dict(), "markdown": report.markdown()}
 
     @staticmethod

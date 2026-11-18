@@ -1485,6 +1485,7 @@
     previewAction: previewAction,
     choose: choose,
     replace: function (body) { state = body; render(); },
+    refresh: refresh,
     el: el
   };
   var kpiBox = document.getElementById("kpis");

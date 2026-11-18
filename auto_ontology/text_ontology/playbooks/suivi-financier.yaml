@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: suivi-financier
+name: Suivi financier & KPIs
+description: >-
+  Indicateurs, budgets, objectifs et réalisés tirés de rapports, de comptes
+  rendus et de tableurs, pour suivre les écarts et les échéances.
+focus: |
+  Relève chaque indicateur chiffré avec sa période (mois, trimestre, année)
+  et son unité : chiffre d'affaires, marge, coûts, budget, objectif, réalisé,
+  effectifs, trésorerie. Rattache chaque chiffre à l'entité qu'il mesure
+  (société, projet, équipe, produit). Écris les montants avec leur unité
+  (1,2 M€) et les périodes telles quelles (T3 2026, 2026-09).
+classes: [Organisation, Projet, Indicateur, Budget, Periode]
+predicates:
+  - mesure
+  - porte_sur
+  - a_pour_objectif
+  - depend_de
+  - est_responsable_de
+questions:
+  - Quels budgets dépassent leur objectif ?
+  - Quels indicateurs ont changé depuis le dernier rapport ?
+  - Qui est responsable de chaque budget ?
+checks:
+  - id: budget-sans-responsable
+    title: Budget sans responsable
+    kind: missing_relation
+    severity: haute
+    classes: [Budget, Projet]
+    predicates: [est_responsable_de, a_pour_responsable, est_gere_par, pilote]
+    advice: Nommer un responsable pour chaque ligne de budget.
+  - id: indicateur-sans-periode
+    title: Indicateur sans période
+    kind: missing_attribute
+    severity: moyenne
+    classes: [Indicateur]
+    attributes: [periode, annee, trimestre, mois, date, period, year, quarter]
+    advice: Un chiffre sans période ne se compare pas.
+  - id: depassement
+    title: Réalisé au-dessus de l'objectif ou du budget
+    kind: sql
+    severity: haute
+    sql: >-
+      SELECT r.entity, r.value AS realise, o.value AS prevu, r.document
+      FROM onto_attributes r
+      JOIN onto_attributes o ON o.entity_key = r.entity_key
+      WHERE r.key IN ('realise', 'depense', 'cout_reel', 'actual')
+        AND o.key IN ('budget', 'objectif', 'prevu', 'target')
+        AND try_cast(regexp_replace(r.value, '[^0-9.]', '', 'g') AS DOUBLE)
+          > try_cast(regexp_replace(o.value, '[^0-9.]', '', 'g') AS DOUBLE)
+    message: "réalisé {realise} pour {prevu} prévu"
+    advice: Expliquer l'écart ou réviser la prévision.
+  - id: echeance-financiere
+    title: Échéance financière dans les 30 jours
+    kind: date_within
+    severity: moyenne
+    days: 30
+    attributes: [date_echeance, echeance, date_paiement, date_cloture, due_date, deadline]
