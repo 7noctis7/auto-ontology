@@ -66,6 +66,7 @@ class DocumentRecord(BaseModel):
     prompt_version: str = ""
     model: str = ""
     fingerprint: str = ""
+    text_sha256: str = ""
     title: str = ""
     author: str = ""
     date: str = ""

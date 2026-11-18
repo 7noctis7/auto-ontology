@@ -111,11 +111,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Dossier importé automatiquement (les fichiers déjà connus sont ignorés).",
     )
     import_parser = commands.add_parser(
-        "import", help="Extrait plusieurs fichiers dans le projet courant."
+        "import",
+        help="Importe des fichiers, des dossiers (Obsidian), des zips (Notion), "
+        "des e-mails (.eml) et des tableurs dans le projet courant.",
     )
     import_parser.add_argument("paths", nargs="*")
     import_parser.add_argument(
         "--paste", action="store_true", help="Importe aussi le texte du presse-papiers."
+    )
+    import_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Réextrait un contenu déjà présent (par exemple avec un autre modèle).",
     )
     import_parser.add_argument("--home", default=None)
     import_parser.add_argument("--fake", action="store_true")
@@ -200,11 +207,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.paths and pasted is None:
             print("error: indiquez des fichiers ou --paste.", file=sys.stderr)
             return 2
-        import_paths(
-            [Path(path) for path in args.paths],
+        return import_paths(
+            [Path(path).expanduser() for path in args.paths],
             home=Path(args.home) if args.home else None,
             fake=args.fake,
             pasted=pasted,
+            force=args.force,
         )
     elif args.command in ("brief", "diff"):
         return daily_report(
@@ -255,8 +263,11 @@ def daily_report(kind: str, *, since: str, as_json: bool, home: Path | None) -> 
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    from auto_ontology.text_ontology.inbox import read_journal
+
+    folder = store.project_dir(project.id)  # type: ignore[attr-defined]
     report = (
-        brief(project, moment)  # type: ignore[arg-type]
+        brief(project, moment, read_journal(folder, moment))  # type: ignore[arg-type]
         if kind == "brief"
         else diff(project, store.project_dir(project.id), moment)  # type: ignore[arg-type, attr-defined]
     )
@@ -354,63 +365,89 @@ def open_folder(
 
 
 def import_paths(
-    paths: list[Path], *, home: Path | None, fake: bool, pasted: str | None = None
-) -> None:
-    """Extract each file into the current project. Same pipeline as the page."""
-    from auto_ontology.text_ontology.documents import load_bytes
-    from auto_ontology.text_ontology.llm_settings import (
-        build_llm,
-        model_label,
-        resolve_llm_config,
-    )
-    from auto_ontology.text_ontology.pipeline import ingest_document
-    from auto_ontology.text_ontology.sample import FakeLLM
-    from auto_ontology.text_ontology.store import ProjectStore
+    paths: list[Path],
+    *,
+    home: Path | None,
+    fake: bool,
+    pasted: str | None = None,
+    force: bool = False,
+) -> int:
+    """Bring each file into the current project. Same pipeline as the page.
 
-    from auto_ontology.text_ontology.tables import import_tabular, is_tabular
+    A folder is walked (an Obsidian vault), a zip is opened (a Notion export),
+    an email brings its attachments and a spreadsheet becomes a table. Returns
+    the exit status: 1 when nothing could be brought in.
+    """
+    from datetime import datetime
+
+    from auto_ontology.text_ontology.inbox import (
+        Item,
+        ingest_item,
+        unpack,
+        unreadable,
+        walk,
+    )
+    from auto_ontology.text_ontology.store import ProjectStore
 
     store = ProjectStore(home or default_home())
     project = store.current() or store.create("Import")
-    documents = [path for path in paths if not is_tabular(path.name)]
+    folder = store.project_dir(project.id)
+    items: list[Item] = []
+    unopened = 0
     for path in paths:
-        if is_tabular(path.name):
-            # A spreadsheet becomes a table: no model needed.
-            for record in import_tabular(store, project, path.name, path.read_bytes()):
-                print(f"{path.name} → table {record.table} ({record.rows} lignes)")
-    if not documents and pasted is None:
-        return
-    config = resolve_llm_config(store)
-    llm = FakeLLM() if fake else build_llm(config)
-    label = "démonstration" if fake else model_label(llm, config)
-    from datetime import datetime
-
-    from auto_ontology.text_ontology.documents import load_text
-
-    sources = [
-        (path.name, lambda path=path: load_bytes(path.name, path.read_bytes()))
-        for path in documents
-    ]
+        files = list(walk(path, exclude=store.home)) if path.is_dir() else [path]
+        if path.is_dir() and not files:
+            print(f"{path} : aucun fichier pris en charge.", file=sys.stderr)
+        for file in files:
+            try:
+                items += unpack(file.name, file.read_bytes())
+            except OSError as exc:
+                unopened += 1
+                print(f"{file} : illisible ({exc.strerror}).", file=sys.stderr)
+            except ValueError as exc:  # DocumentReadError: broken email or zip
+                unopened += 1
+                print(unreadable(folder, file.name, str(exc)).line(), file=sys.stderr)
     if pasted is not None:
         name = f"presse-papiers {datetime.now():%Y-%m-%d %H%M}.txt"
-        sources.append((name, lambda: load_text(name, pasted)))
-    for name, read in sources:
+        items.append(Item(name, pasted.encode("utf-8")))
+
+    model = _model_source(store, fake=fake)
+    landed = 0
+    for item in items:
+        outcome = ingest_item(store, project.id, item, model=model, force=force)
+        stream = sys.stderr if outcome.kind == "error" else sys.stdout
+        print(outcome.line(), file=stream)
+        landed += outcome.kind in {"document", "table", "duplicate"}
+    if items:
         project = store.load(project.id)
-        loaded = read()
-        ingest_document(
-            store,
-            project,
-            loaded,
-            config=config,
-            llm=llm,
-            model_label=label,
-            # Both are required: without them `ontology import` failed on
-            # every file with a TypeError, and never imported anything.
-            force=False,
-            cancel_event=None,
-            on_event=lambda _event: None,
+        print(
+            f"Projet « {project.name} » : {len(project.ontology.triplets)} faits, "
+            f"{len(project.datasets)} table(s)."
         )
-        project = store.load(project.id)
-        print(f"{name} → {project.name} ({len(project.ontology.triplets)} faits)")
+    return 0 if landed or not (items or unopened) else 1
+
+
+def _model_source(store: object, *, fake: bool) -> object:
+    """Build the model once, and only if a document needs one."""
+    built: list[object] = []
+
+    def source() -> object:
+        if not built:
+            from auto_ontology.text_ontology.llm_settings import (
+                build_llm,
+                model_label,
+                resolve_llm_config,
+            )
+            from auto_ontology.text_ontology.sample import FakeLLM
+
+            config = resolve_llm_config(store)  # type: ignore[arg-type]
+            llm = FakeLLM() if fake else build_llm(config)
+            built.append(
+                (config, llm, "démonstration" if fake else model_label(llm, config))
+            )
+        return built[0]
+
+    return source
 
 
 def write_sdk(destination: Path, *, home: Path | None) -> None:

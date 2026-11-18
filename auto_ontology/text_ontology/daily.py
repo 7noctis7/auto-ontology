@@ -6,8 +6,9 @@
 
 ``brief`` answers "what came in, and what needs a look?": documents and
 tables added since a moment, the facts and entities they brought, then
-alerts (chunks that failed, incomplete or cancelled extractions, classes
-with several parents, entities linked to nothing).
+alerts (files that could not be read or had no model, chunks that failed,
+incomplete or cancelled extractions, classes with several parents, entities
+linked to nothing). Skipped duplicates come from the activity journal.
 
 ``diff`` answers "what changed since then?" by comparing the project with
 the snapshot the studio kept just before that moment (the same snapshots
@@ -23,13 +24,17 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from auto_ontology.text_ontology.normalize import entity_key, multi_parent_summary
 from auto_ontology.text_ontology.studio_models import Project
+
+if TYPE_CHECKING:
+    from auto_ontology.text_ontology.inbox import Outcome
 
 _PERIOD = re.compile(r"^\s*(\d+)\s*(m|min|h|d|j|w|s)\s*$", re.IGNORECASE)
 _UNITS = {
@@ -96,6 +101,8 @@ class Brief:
     top_entities: list[tuple[str, int]] = field(default_factory=list)
     rules: list[str] = field(default_factory=list)
     alerts: list[str] = field(default_factory=list)
+    # From the activity journal: files skipped as already known.
+    duplicates: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -107,6 +114,7 @@ class Brief:
             "top_entities": [{"name": n, "facts": c} for n, c in self.top_entities],
             "rules": self.rules,
             "alerts": self.alerts,
+            "duplicates": self.duplicates,
         }
 
     def markdown(self) -> str:
@@ -127,6 +135,13 @@ class Brief:
             )
         if self.new_facts:
             lines.append(f"- {self.new_facts} faits apportés au total.")
+        if self.duplicates:
+            shown = ", ".join(self.duplicates[:_SHOWN])
+            more = " …" if len(self.duplicates) > _SHOWN else ""
+            lines.append(
+                f"- {len(self.duplicates)} fichier(s) déjà connu(s), ignoré(s) : "
+                f"{shown}{more}."
+            )
         if self.top_entities:
             names = ", ".join(f"{name} ({count})" for name, count in self.top_entities)
             lines.append(f"- Entités les plus citées : {names}.")
@@ -138,8 +153,13 @@ class Brief:
         return "\n".join(lines) + "\n"
 
 
-def brief(project: Project, since: datetime) -> Brief:
-    """What *project* gained since *since*, and what deserves a look."""
+def brief(project: Project, since: datetime, journal: Sequence[Outcome] = ()) -> Brief:
+    """What *project* gained since *since*, and what deserves a look.
+
+    *journal* is the activity journal from *since* on (see
+    :func:`inbox.read_journal`): it adds what was skipped or failed, which
+    the project itself does not remember.
+    """
     new_documents = [
         d for d in project.documents if (_moment(d.added_at) or since) >= since
     ]
@@ -184,7 +204,18 @@ def brief(project: Project, since: datetime) -> Brief:
         for rule in getattr(project, "rules", [])
         if (_moment(rule.created_at) or since) >= since
     ]
-    result.alerts = _alerts(project)
+    result.alerts = [
+        *(
+            f"{entry.filename} : {entry.detail}"
+            + (f" (reçu de {entry.origin})" if entry.origin else "")
+            for entry in journal
+            if entry.kind in {"error", "skipped"}
+        ),
+        *_alerts(project),
+    ]
+    result.duplicates = list(
+        dict.fromkeys(e.filename for e in journal if e.kind == "duplicate")
+    )
     return result
 
 

@@ -68,6 +68,15 @@ def fingerprint(content_hash: str, prompt: str, model: str, chunk_chars: int) ->
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _complete(document: DocumentRecord) -> bool:
+    """An extraction that finished: re-importing it would change nothing.
+
+    One with chunks the model did not answer is run again instead; the
+    chunk cache makes that cost only the missing chunks.
+    """
+    return document.status == "ok" and not document.chunks_failed
+
+
 def ingest_document(
     store: ProjectStore,
     project: Project,
@@ -92,7 +101,7 @@ def ingest_document(
         (document for document in project.documents if document.fingerprint == stamp),
         None,
     )
-    if previous is not None and not force:
+    if previous is not None and not force and _complete(previous):
         on_event(
             {
                 "type": "duplicate",
@@ -104,6 +113,27 @@ def ingest_document(
             }
         )
         return project
+    if previous is None and loaded.text_sha256:
+        # The same text under another name, pasted, or read by another model:
+        # extracting it again would only duplicate its facts.
+        same = next(
+            (d for d in project.documents if d.text_sha256 == loaded.text_sha256),
+            None,
+        )
+        if same is not None and not force and _complete(same):
+            on_event(
+                {
+                    "type": "duplicate",
+                    "filename": loaded.filename,
+                    "message": (
+                        f"Le contenu de {loaded.filename} est déjà dans le projet "
+                        f"({same.filename}). Rien n'a été dupliqué ; forcez "
+                        "l'import pour le réextraire avec ce modèle."
+                    ),
+                }
+            )
+            return project
+        previous = same
 
     store.save(project, snapshot=True)
     naming = not project.documents and project.name in {
@@ -130,6 +160,7 @@ def ingest_document(
         prompt_version=prompt,
         model=model_label,
         fingerprint=stamp,
+        text_sha256=loaded.text_sha256,
     )
     _apply_profile(document, loaded)
     if naming:

@@ -4,9 +4,11 @@
 
 """Import files that appear in a folder.
 
-The same file is not extracted twice: the pipeline skips a fingerprint it
-already stored. The loop is started by ``ontology serve`` and stays quiet
-when no folder is configured.
+Sub-folders are read too (a notes vault), an email brings its attachments
+and a zip its notes; see :mod:`inbox`. The same content is not extracted
+twice: the pipeline skips a text it already stored. Every arrival is
+journaled for ``ontology brief``. The loop is started by ``ontology serve``
+and stays quiet when no folder is configured.
 """
 
 from __future__ import annotations
@@ -16,37 +18,20 @@ import logging
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from auto_ontology.text_ontology.documents import DocumentReadError, load_bytes
+from auto_ontology.text_ontology.inbox import ingest_item, unpack, unreadable, walk
 from auto_ontology.text_ontology.llm_settings import (
     build_llm,
     model_label,
     resolve_llm_config,
 )
-from auto_ontology.text_ontology.pipeline import IngestError, ingest_document
-from auto_ontology.text_ontology.tables import (
-    TABULAR_SUFFIXES,
-    TableError,
-    import_tabular,
-    is_tabular,
-)
 from auto_ontology.text_ontology.sample import FakeLLM
 
-_SUFFIXES = {
-    ".txt",
-    ".md",
-    ".markdown",
-    ".pdf",
-    ".epub",
-    ".docx",
-    ".html",
-    ".htm",
-    ".rst",
-    ".json",
-    ".eml",
-    *TABULAR_SUFFIXES,
-}
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
+    from auto_ontology.text_ontology.llm_settings import LlmConfig
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +81,12 @@ def _scan(studio: object, seen: set[tuple[str, int]]) -> None:
         return
     if not folder.is_dir():
         return
-    for path in sorted(folder.iterdir()):
-        if not path.is_file() or path.suffix.lower() not in _SUFFIXES:
-            continue
-        stamp = (str(path), path.stat().st_mtime_ns)
+    # Sub-folders too: an Obsidian vault or an unpacked Notion export.
+    for path in walk(folder, exclude=store.home):
+        try:
+            stamp = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            continue  # removed between the listing and now
         if stamp in seen:
             continue
         if _ingest_path(studio, path):
@@ -117,49 +104,49 @@ def _ingest_path(studio: object, path: Path) -> bool:
 
 def _ingest_claimed(studio: object, path: Path) -> None:
     store = studio.store  # type: ignore[attr-defined]
-    if is_tabular(path.name):
-        project = store.current() or store.create("Import")
-        try:
-            import_tabular(store, project, path.name, path.read_bytes())
-        except (OSError, TableError):
-            logger.warning(
-                "Watched folder: %s could not be loaded as a table", path.name
-            )
-        return
-    try:
-        loaded = load_bytes(path.name, path.read_bytes())
-    except (OSError, DocumentReadError):
-        return
-    config = resolve_llm_config(store)
-    fake = bool(getattr(studio, "fake", False))
-    if fake or getattr(studio, "llm_factory", None) is not None:
-        factory = getattr(studio, "llm_factory", None)
-        llm = factory(config) if factory is not None else FakeLLM()
-        label = "démonstration"
-    elif not config.configured:
-        return
-    else:
-        try:
-            llm = build_llm(config)
-        except EnvironmentError:
-            return
-        label = model_label(llm, config)
     # The project open in the studio, not merely the first one listed.
     project = store.current() or store.create("Import")
     try:
-        ingest_document(
-            store,
-            project,
-            loaded,
-            config=config,
-            llm=llm,
-            model_label=label,
-            force=False,
-            cancel_event=None,
-            on_event=lambda _event: None,
-        )
-    except IngestError:
+        items = unpack(path.name, path.read_bytes())
+    except OSError:
+        return  # being written or removed: the next pass sees it again
+    except ValueError as exc:  # DocumentReadError: a broken email or zip
+        unreadable(store.project_dir(project.id), path.name, str(exc))
+        logger.warning("Watched folder: %s could not be read (%s)", path.name, exc)
         return
+    model = _model_source(studio)
+    for item in items:
+        outcome = ingest_item(store, project.id, item, model=model)
+        if outcome.kind == "error":
+            logger.warning("Watched folder: %s", outcome.line())
+
+
+def _model_source(studio: object) -> object:
+    """Build the model once, when the first document needs it."""
+    built: list[tuple[LlmConfig, BaseChatModel, str] | None] = []
+
+    def source() -> tuple[LlmConfig, BaseChatModel, str] | None:
+        if not built:
+            built.append(_build_model(studio))
+        return built[0]
+
+    return source
+
+
+def _build_model(studio: object) -> tuple[LlmConfig, BaseChatModel, str] | None:
+    config = resolve_llm_config(studio.store)  # type: ignore[attr-defined]
+    factory = getattr(studio, "llm_factory", None)
+    if factory is not None:
+        return config, factory(config), "démonstration"
+    if getattr(studio, "fake", False):
+        return config, FakeLLM(), "démonstration"
+    if not config.configured:
+        return None
+    try:
+        llm = build_llm(config)
+    except EnvironmentError:
+        return None
+    return config, llm, model_label(llm, config)
 
 
 def start_watcher(studio: object) -> threading.Event:

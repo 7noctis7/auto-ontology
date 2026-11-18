@@ -461,12 +461,15 @@ def install_api(app: FastAPI) -> None:
     def get_brief(request: Request, since: str = "24h") -> dict[str, Any]:
         """What came in since *since* (24h, 7d, a date), and what to check."""
         from auto_ontology.text_ontology.daily import brief, parse_since
+        from auto_ontology.text_ontology.inbox import read_journal
 
         try:
             moment = parse_since(since)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        result = brief(_project(request), moment)
+        studio, project = _studio(request)
+        journal = read_journal(studio.store.project_dir(project.id), moment)
+        result = brief(project, moment, journal)
         return {**result.as_dict(), "markdown": result.markdown()}
 
     @app.get("/api/v1/diff")

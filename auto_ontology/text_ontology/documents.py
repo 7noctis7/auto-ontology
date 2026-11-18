@@ -18,6 +18,7 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from pathlib import PurePosixPath
 
 from auto_ontology.text_ontology.clean import clean_text as clean_pdf_noise
 from auto_ontology.text_ontology.clean import rejoin_line_breaks
@@ -27,6 +28,20 @@ _HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
 _PDF_SUFFIXES = {".pdf"}
 _EPUB_SUFFIXES = {".epub"}
 _DOCX_SUFFIXES = {".docx"}
+_EMAIL_SUFFIXES = {".eml"}
+_NOTE_SUFFIXES = {".md", ".markdown"}
+
+# Every suffix the studio reads as a document (spreadsheets are tables, see
+# ``tables.TABULAR_SUFFIXES``; ``.csv`` is both and is loaded as a table).
+DOCUMENT_SUFFIXES = (
+    _TEXT_SUFFIXES
+    | _HTML_SUFFIXES
+    | _PDF_SUFFIXES
+    | _EPUB_SUFFIXES
+    | _DOCX_SUFFIXES
+    | _EMAIL_SUFFIXES
+    | {".json"}
+)
 
 # An EPUB or DOCX is a zip. These bound what one may expand to, so a small
 # crafted file cannot exhaust memory (a "zip bomb").
@@ -61,6 +76,9 @@ class LoadedDocument:
     warnings: list[str] = field(default_factory=list)
     original: bytes = b""
     pages: int = 0
+    # Hash of the text itself, so the same content saved as another file, or
+    # pasted, is recognised as already in the project.
+    text_sha256: str = ""
 
 
 def noise_ratio(text: str) -> float:
@@ -191,7 +209,13 @@ def _finish(
         warnings=warnings,
         original=original,
         pages=pages or max(1, len(text) // 1800) if text.strip() else 0,
+        text_sha256=text_hash(text),
     )
+
+
+def text_hash(text: str) -> str:
+    """Identity of a text, whatever its spacing or line breaks."""
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()
 
 
 class _HTMLText(HTMLParser):
@@ -304,6 +328,186 @@ def _epub_text(data: bytes) -> str:
     return "\n\n".join(parts)
 
 
+# --- Notes exported from Obsidian or Notion --------------------------------
+
+_FRONTMATTER = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.DOTALL)
+_FRONT_TITLE = re.compile(r"^title:\s*[\"']?(.+?)[\"']?\s*$", re.MULTILINE)
+_EMBED = re.compile(r"!\[\[[^\]]*\]\]")
+_WIKILINK_ALIAS = re.compile(r"\[\[[^\]|]*\|([^\]]+)\]\]")
+_WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]]*)?\]\]")
+_CALLOUT = re.compile(r"^(>\s*)\[![\w-]+\][+-]?\s*", re.MULTILINE)
+_NOTION_ID = re.compile(r"\s+[0-9a-f]{32}(?=(?:\.[A-Za-z0-9]+)?$)")
+
+
+def note_text(text: str) -> tuple[str, list[str]]:
+    """Markdown from a notes app, read as prose.
+
+    The front matter is dropped (its ``title`` becomes the heading when the
+    note has none), ``[[Page|alias]]`` reads as ``alias``, ``[[Page]]`` as
+    ``Page``, embeds disappear and callout markers are removed.
+    """
+    notes: list[str] = []
+    match = _FRONTMATTER.match(text)
+    if match:
+        text = text[match.end() :]
+        title = _FRONT_TITLE.search(match.group(1))
+        if title and not text.lstrip().startswith("#"):
+            text = f"# {title.group(1)}\n\n{text}"
+        notes.append("Propriétés de la note retirées.")
+    if "[[" in text:
+        text = _EMBED.sub("", text)
+        text = _WIKILINK_ALIAS.sub(r"\1", text)
+        text = _WIKILINK.sub(r"\1", text)
+    text = _CALLOUT.sub(r"\1", text)
+    return text, notes
+
+
+def display_name(path: str) -> str:
+    """A member path as a file name: no folders, no Notion page id."""
+    name = PurePosixPath(path.replace("\\", "/")).name
+    return _NOTION_ID.sub("", name)
+
+
+# --- Email (.eml) ---------------------------------------------------------
+
+_MAX_ATTACHMENTS = 20
+_MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
+_QUOTE_INTRO = re.compile(
+    r"^(?:le .{4,120} a écrit\s*:|on .{4,120} wrote\s*:|-{2,}\s*original message"
+    r"\s*-{2,}|-{2,}\s*message d'origine\s*-{2,})\s*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """A file carried by an email or an archive."""
+
+    filename: str
+    data: bytes
+
+
+def _message(data: bytes) -> object:
+    from email import policy
+    from email.parser import BytesParser
+
+    try:
+        return BytesParser(policy=policy.default).parsebytes(data)
+    except Exception as exc:  # the parser is lenient; this is a safety net
+        raise DocumentReadError(f"Ce message n'a pas pu être lu : {exc}") from exc
+
+
+def _part_text(part: object) -> str:
+    try:
+        content = part.get_content()  # type: ignore[attr-defined]
+    except (LookupError, ValueError, AssertionError):
+        payload = part.get_payload(decode=True) or b""  # type: ignore[attr-defined]
+        content = _decode(payload) if isinstance(payload, bytes) else str(payload)
+    if not isinstance(content, str):
+        content = _decode(bytes(content))
+    if part.get_content_type() == "text/html":  # type: ignore[attr-defined]
+        parser = _HTMLText()
+        parser.feed(content)
+        content = parser.text()
+    return content
+
+
+def _without_quotes(body: str) -> tuple[str, bool]:
+    """The new part of a reply: quoted earlier messages are cut."""
+    kept: list[str] = []
+    cut = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if _QUOTE_INTRO.match(stripped):
+            cut = True
+            break
+        if stripped.startswith(">"):
+            cut = True
+            continue
+        kept.append(line)
+    text = "\n".join(kept).strip()
+    # A message that is only a quote keeps its quote: it is all there is.
+    return (text, cut) if text else (body, False)
+
+
+def _email_text(data: bytes) -> tuple[str, list[str]]:
+    message = _message(data)
+    warnings: list[str] = []
+    lines = []
+    for label, header in (
+        ("Objet", "subject"),
+        ("De", "from"),
+        ("À", "to"),
+        ("Cc", "cc"),
+        ("Date", "date"),
+    ):
+        value = message.get(header)  # type: ignore[attr-defined]
+        if value:
+            lines.append(f"{label} : {' '.join(str(value).split())}")
+    body_part = message.get_body(preferencelist=("plain", "html"))  # type: ignore[attr-defined]
+    body = _part_text(body_part) if body_part is not None else ""
+    body, quoted = _without_quotes(body)
+    if quoted:
+        warnings.append("Citations des messages précédents retirées.")
+    names = [a.filename for a in _attachments(message)]
+    if names:
+        lines.append("Pièces jointes : " + ", ".join(names))
+    if not body.strip():
+        warnings.append("Ce message n'a pas de corps de texte.")
+    return "\n".join(lines) + "\n\n" + body, warnings
+
+
+def _attachments(message: object) -> list[Attachment]:
+    found: list[Attachment] = []
+    for part in message.iter_attachments():  # type: ignore[attr-defined]
+        name = part.get_filename()
+        if not name:
+            continue
+        payload = part.get_payload(decode=True)
+        if not isinstance(payload, bytes) or len(payload) > _MAX_ATTACHMENT_BYTES:
+            continue
+        found.append(Attachment(display_name(name), payload))
+        if len(found) >= _MAX_ATTACHMENTS:
+            break
+    return found
+
+
+def email_attachments(data: bytes) -> list[Attachment]:
+    """The files attached to an email, at most twenty, each under 50 MB."""
+    return _attachments(_message(data))
+
+
+# --- Archives (a Notion export is a zip) ------------------------------------
+
+_MAX_ARCHIVE_MEMBERS = 500
+
+
+def archive_members(data: bytes, accepts: object) -> list[Attachment]:
+    """The files of a zip whose name *accepts* returns true for.
+
+    Folders, hidden files and macOS resource forks are skipped, and the
+    archive is checked for an abnormal expansion before anything is read.
+    """
+    _check_archive(data, "ZIP")
+    members: list[Attachment] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for info in archive.infolist():
+            parts = PurePosixPath(info.filename.replace("\\", "/")).parts
+            if (
+                info.is_dir()
+                or not parts
+                or any(part.startswith((".", "__MACOSX")) for part in parts)
+            ):
+                continue
+            name = display_name(info.filename)
+            if not accepts(name):  # type: ignore[operator]
+                continue
+            members.append(Attachment(name, archive.read(info)))
+            if len(members) >= _MAX_ARCHIVE_MEMBERS:
+                break
+    return members
+
+
 def _suffix(filename: str) -> str:
     dot = filename.rfind(".")
     if dot < 0:
@@ -319,14 +523,16 @@ def load_text(filename: str, text: str) -> LoadedDocument:
 
 
 # Formats whose text is not the file's bytes: they go through their reader.
-_STRUCTURED_SUFFIXES = _PDF_SUFFIXES | _EPUB_SUFFIXES | _DOCX_SUFFIXES | _HTML_SUFFIXES
+_STRUCTURED_SUFFIXES = (
+    _PDF_SUFFIXES | _EPUB_SUFFIXES | _DOCX_SUFFIXES | _HTML_SUFFIXES | _EMAIL_SUFFIXES
+)
 
 
 def read_document_text(filename: str, data: bytes) -> tuple[str, list[str]]:
     """The text of a file for the command line, and what reading it noted.
 
-    PDF, EPUB, DOCX and HTML go through the studio's readers (and their
-    cleaning). Anything else is decoded as it is, so a plain text file reaches
+    PDF, EPUB, DOCX, HTML and email go through the studio's readers (and
+    their cleaning). Anything else is decoded as it is, so a plain text file reaches
     the extractor untouched unless ``--clean`` is asked for.
     """
     if _suffix(filename) in _STRUCTURED_SUFFIXES:
@@ -364,19 +570,29 @@ def load_bytes(filename: str, data: bytes) -> LoadedDocument:
     if suffix in _HTML_SUFFIXES:
         text = _html_text(data)
         return _finish(name, "text/html", text, warnings, data)
+    if suffix in _EMAIL_SUFFIXES:
+        text, warnings = _email_text(data)
+        return _finish(name, "message/rfc822", text, warnings, data)
+    if suffix in _NOTE_SUFFIXES:
+        text, warnings = note_text(_decode(data))
+        return _finish(name, "text/markdown", text, warnings, data)
     if suffix in _TEXT_SUFFIXES or suffix == "":
         text = _decode(data)
-        media = "text/markdown" if suffix in {".md", ".markdown"} else "text/plain"
-        return _finish(name, media, text, warnings, data)
+        return _finish(name, "text/plain", text, warnings, data)
     if suffix == ".json":
         text = _decode(data)
         return _finish(name, "application/json", text, warnings, data)
+    if suffix == ".zip":
+        raise DocumentReadError(
+            "Une archive contient plusieurs fichiers : importez-la avec "
+            "`ontology import export.zip`, ou déposez-la dans le dossier surveillé."
+        )
     try:
         text = _decode(data)
     except DocumentReadError as exc:
         raise DocumentReadError(
             "Format non pris en charge. Déposez un PDF, EPUB, DOCX, HTML, "
-            "Markdown ou un fichier texte."
+            "un e-mail (.eml), du Markdown ou un fichier texte."
         ) from exc
     warnings.append(f"Format {suffix or 'inconnu'} lu comme du texte brut.")
     return _finish(name, "application/octet-stream", text, warnings, data)
