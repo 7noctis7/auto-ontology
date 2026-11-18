@@ -533,3 +533,30 @@ select, textarea {
 .inline-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .findings { margin: 0; padding-left: 1.2rem; }
 .findings li { margin: 0.3rem 0; line-height: 1.4; }
+
+/* Home: the step-by-step guide. */
+.home h2 { margin: 8px 0 0; }
+.home-start { background: var(--panel); border: 2px dashed var(--accent); border-radius: 12px; padding: 14px 16px; }
+.home-start p { margin: 0 0 10px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.step { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.step header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.step h3 { margin: 0; font-size: 15px; flex: 1 1 auto; }
+.step p { margin: 6px 0 0; line-height: 1.45; }
+.step code { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.step .paste-actions { margin-top: 8px; }
+.step-number { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--bar); color: var(--ink); font-weight: 650; font-size: 13px; }
+.step-done { border-left-color: var(--ok); }
+.step-done .step-number { background: var(--ok); color: #fff; }
+.step-todo { border-left-color: var(--accent); }
+.step-running { border-left-color: var(--accent); }
+.step-warn { border-left-color: var(--warn); }
+.step-state { font-weight: 600; color: var(--muted); }
+.pill { flex: none; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--faint); }
+.pill-done { color: var(--ok); border-color: var(--ok); }
+.pill-todo, .pill-running { color: var(--accent); border-color: var(--accent); }
+.pill-warn { color: var(--warn); border-color: var(--warn); }
+.data-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.data-grid h3 { margin: 0 0 6px; font-size: 14px; }
+.data-grid p { margin: 0; line-height: 1.45; }
+.home-daily { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; overflow: auto; font-family: var(--mono); font-size: 12px; }

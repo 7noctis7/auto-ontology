@@ -584,7 +584,7 @@ def _view(studio: Studio) -> dict[str, Any]:
             "documents": [],
             "suggestions": [],
         }
-    return build_view(
+    view = build_view(
         project,
         path=str(studio.store.project_dir(project.id) / "project.json"),
         can_undo=studio.store.can_undo(project.id),
@@ -592,6 +592,10 @@ def _view(studio: Studio) -> dict[str, Any]:
         llm=llm,
         projects=projects,
     )
+    # A document still marked running without this was interrupted: the
+    # home page then says to drop it again (its chunks come from the cache).
+    view["extracting"] = studio.store.busy_reason(project.id) is not None
+    return view
 
 
 def _last_notice(studio: Studio, project_id: str) -> str:

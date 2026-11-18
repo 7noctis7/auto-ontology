@@ -16,6 +16,7 @@ from auto_ontology.text_ontology.cache import FileChunkCache
 from auto_ontology.text_ontology.extractor import extract_text_ontology
 from auto_ontology.text_ontology.models import OntologyClass, TextOntology
 from auto_ontology.text_ontology.sample import SAMPLE_TEXT, FakeLLM
+from auto_ontology.text_ontology.store import ProjectStore
 
 _SECRET_ENV = (
     "ONTOLOGY_LLM_API_KEY",
@@ -109,6 +110,24 @@ def test_sample_builds_a_graph_with_provenance(home) -> None:
     assert any(
         "Camille" in quote or "bibliothèque" in quote.casefold() for quote in quotes
     )
+
+
+def test_the_home_tab_has_what_it_needs(home) -> None:
+    client = _app(home, fake=True)
+
+    page = client.get("/").text
+    script = client.get("/assets/home.js")
+    state = client.post("/api/ingest", json={"text": SAMPLE_TEXT, "sync": True}).json()
+    store = ProjectStore(home)
+    with store.busy(state["project"]["id"]):
+        during = client.get("/api/state").json()
+
+    assert 'data-view="home"' in page and "/assets/home.js" in page
+    assert ".xlsx" in page and ".eml" in page  # the picker takes tables and mail
+    assert script.status_code == 200 and "StudioHome" in script.text
+    assert state["extracting"] is False and during["extracting"] is True
+    document = state["documents"][0]
+    assert document["chunks_done"] == document["chunks_total"] == 1
 
 
 def test_txt_pdf_and_epub_each_produce_a_graph(home) -> None:

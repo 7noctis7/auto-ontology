@@ -350,6 +350,7 @@ def build_view(
                 "facts": fact_count,
                 "status": document.status,
                 "chunks_total": document.chunks_total,
+                "chunks_done": len(document.chunk_notes),
                 "chunks_failed": list(document.chunks_failed),
                 "chunks_cached": list(document.chunks_cached),
                 "warnings": list(document.warnings),

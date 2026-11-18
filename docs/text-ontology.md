@@ -240,6 +240,13 @@ extraction's final save.
 The studio keeps one folder per project under `~/AutoOntology`
 (`ONTOLOGY_HOME`). These commands work on the project the page has open.
 
+The page opens on **Accueil** (Home): eight steps from connecting the model
+to the exports, each showing where the open project stands (model, playbook,
+files, the extraction in progress or interrupted, failed chunks, corrections),
+then how to bring in each kind of data. `ontology brief` shows the same
+progress: "extraction en cours, n/N morceaux lus", or "interrompue" with how
+to resume when no process holds the project.
+
 ```bash
 uv run ontology open ~/Dossiers/Fournisseurs --playbook audit-contrats
 uv run ontology import ~/Vault ~/Downloads/export-notion.zip relance.eml

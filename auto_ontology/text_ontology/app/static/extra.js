@@ -89,6 +89,7 @@
     else if (view === "analysis") box.replaceChildren(analysis(state));
     else if (view === "dashboards") box.replaceChildren(boards(state));
     else if (view === "guide") box.replaceChildren(guide());
+    else if (view === "home" && window.StudioHome) box.replaceChildren(window.StudioHome.build(state));
   }
 
   function documents(state) {
@@ -477,7 +478,7 @@
   }
 
   document.addEventListener("ontology:render", function () {
-    var view = localStorage.getItem("ontology.view") || "graph";
+    var view = localStorage.getItem("ontology.view") || "home";
     var current = document.querySelector(".views button.is-on");
     if (current) view = current.getAttribute("data-view") || view;
     render(view);

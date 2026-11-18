@@ -9,7 +9,7 @@
   var STR = {
     fr: {
       viewGraph: "Graphe", viewTree: "Hiérarchie", viewGlossary: "Glossaire", viewFacts: "Faits",
-      viewDocuments: "Documents", viewAnalysis: "Analyse", viewBoards: "Tableaux", viewGuide: "Guide",
+      viewDocuments: "Documents", viewAnalysis: "Analyse", viewBoards: "Tableaux", viewGuide: "Guide", viewHome: "Accueil",
       theme: "Sombre", focus: "Focus", communities: "Communautés", fit: "Recentrer",
       layoutForce: "Force", watch: "Dossier à importer", ask: "Question",
       askPlaceholder: "Qui est relié à quoi ?", tourSkip: "Passer", tourNext: "Suivant",
@@ -55,7 +55,7 @@
     },
     en: {
       viewGraph: "Graph", viewTree: "Hierarchy", viewGlossary: "Glossary", viewFacts: "Facts",
-      viewDocuments: "Documents", viewAnalysis: "Analysis", viewBoards: "Boards", viewGuide: "Guide",
+      viewDocuments: "Documents", viewAnalysis: "Analysis", viewBoards: "Boards", viewGuide: "Guide", viewHome: "Home",
       theme: "Dark", focus: "Focus", communities: "Communities", fit: "Fit",
       layoutForce: "Force", watch: "Folder to import", ask: "Question",
       askPlaceholder: "Who is linked to what?", tourSkip: "Skip", tourNext: "Next",
@@ -109,7 +109,7 @@
   ];
 
   var lang = localStorage.getItem("ontology.lang") || "fr";
-  var viewName = localStorage.getItem("ontology.view") || "graph";
+  var viewName = localStorage.getItem("ontology.view") || "home";
   var state = null;
   var selected = null;
   var filter = null;
@@ -341,10 +341,11 @@
     var graphWrap = document.getElementById("graph-wrap");
     var table = document.getElementById("table-view");
     var tree = document.getElementById("tree-view");
-    empty.hidden = hasContent();
+    // The home view has its own way in; the drop zone would cover it.
+    empty.hidden = hasContent() || viewName === "home";
     var showGraph = viewName === "graph";
     var panel = document.getElementById("panel-view");
-    var panelViews = { documents: 1, analysis: 1, dashboards: 1, guide: 1, schema: 1, explorer: 1 };
+    var panelViews = { home: 1, documents: 1, analysis: 1, dashboards: 1, guide: 1, schema: 1, explorer: 1 };
     graphWrap.hidden = !showGraph;
     table.hidden = !(viewName === "glossary" || viewName === "facts");
     tree.hidden = viewName !== "hierarchy";
@@ -1407,7 +1408,7 @@
   });
 
   var commands = [
-    ["graph", "Graphe"], ["hierarchy", "Hiérarchie"], ["glossary", "Glossaire"],
+    ["home", "Accueil"], ["graph", "Graphe"], ["hierarchy", "Hiérarchie"], ["glossary", "Glossaire"],
     ["facts", "Faits"], ["documents", "Documents"], ["analysis", "Analyse"],
     ["dashboards", "Tableaux"], ["guide", "Guide"], ["schema", "Schéma"], ["explorer", "Explorer"]
   ];

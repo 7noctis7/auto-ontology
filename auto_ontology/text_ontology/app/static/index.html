@@ -22,7 +22,8 @@ SPDX-License-Identifier: Apache-2.0
     <select id="project-switch" class="project-switch" hidden aria-label="Projets"></select>
   </div>
   <nav class="views" aria-label="Vues">
-    <button type="button" data-view="graph" class="is-on" data-i18n="viewGraph">Graphe</button>
+    <button type="button" data-view="home" class="is-on" data-i18n="viewHome">Accueil</button>
+    <button type="button" data-view="graph" data-i18n="viewGraph">Graphe</button>
     <button type="button" data-view="hierarchy" data-i18n="viewTree">Hiérarchie</button>
     <button type="button" data-view="glossary" data-i18n="viewGlossary">Glossaire</button>
     <button type="button" data-view="facts" data-i18n="viewFacts">Faits</button>
@@ -117,7 +118,7 @@ SPDX-License-Identifier: Apache-2.0
   <ol id="progress-list"></ol>
 </div>
 
-<input id="file-input" type="file" hidden multiple accept=".txt,.md,.markdown,.pdf,.epub,.docx,.html,.htm,.json,.csv,.rst">
+<input id="file-input" type="file" hidden multiple accept=".txt,.md,.markdown,.pdf,.epub,.docx,.html,.htm,.json,.rst,.eml,.csv,.tsv,.xlsx,.xlsm,.parquet,.sqlite,.sqlite3,.db,.duckdb">
 
 <aside id="settings" class="drawer" hidden>
   <form id="settings-form">
@@ -209,6 +210,7 @@ SPDX-License-Identifier: Apache-2.0
 </div>
 <script src="/assets/vendor/vis-network.min.js"></script>
 <script src="/assets/app.js"></script>
+<script src="/assets/home.js"></script>
 <script src="/assets/extra.js"></script>
 <script src="/assets/foundry.js"></script>
 </body>
