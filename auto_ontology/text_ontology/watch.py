@@ -128,8 +128,8 @@ def _ingest_claimed(studio: object, path: Path) -> None:
         except EnvironmentError:
             return
         label = model_label(llm, config)
-    projects = store.list_projects()
-    project = projects[0] if projects else store.create("Import")
+    # The project open in the studio, not merely the first one listed.
+    project = store.current() or store.create("Import")
     try:
         ingest_document(
             store,

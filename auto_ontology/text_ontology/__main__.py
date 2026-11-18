@@ -40,7 +40,6 @@ from auto_ontology.text_ontology.export import (  # noqa: E402
     ExportFormat,
     export_ontology,
 )
-from auto_ontology.utils import llm_invoke  # noqa: E402
 from auto_ontology.text_ontology.clean import clean_text  # noqa: E402
 from auto_ontology.text_ontology.evaluation import (  # noqa: E402
     CORPUS_DIR,
@@ -68,10 +67,11 @@ _COMMANDS = ("extract", "merge", "export", "clean", "eval")
 # Served by the studio's own parser (auto_ontology.text_ontology.studio): both
 # entry points, `ontology` and `python -m auto_ontology.text_ontology`, accept
 # every command and hand the other group over.
-STUDIO_COMMANDS = ("serve", "import", "ask", "mcp", "sdk")
+STUDIO_COMMANDS = ("open", "serve", "import", "ask", "mcp", "sdk")
 
 _EPILOG = """\
 Studio commands (same entry point):
+  open     one folder, one command: project, import, watching and studio
   serve    open the local studio in the browser (no database, no login)
   import   extract files into the current studio project
   ask      answer from the current project's facts, with sources
@@ -140,11 +140,11 @@ def _extract(args: argparse.Namespace) -> None:
     known_classes = list(args.known_class)
     if args.glossary:
         known_classes += _glossary()
-    if args.timeout is not None:
-        # Read when the client is built, so setting it here is enough.
-        llm_invoke.LLM_INVOKE_TIMEOUT_S = args.timeout
     backend = resolve_backend(
-        provider=args.provider, model=args.model, max_tokens=args.max_tokens
+        provider=args.provider,
+        model=args.model,
+        max_tokens=args.max_tokens,
+        timeout=args.timeout,
     )
     print(f"model: {backend.description}", file=sys.stderr)
     result = extract_text_ontology(
@@ -183,10 +183,11 @@ def _eval(args: argparse.Namespace) -> None:
         documents = load_corpus(directory)
         if not documents:
             raise CliError(f"no <name>.txt with a <name>.gold.json in {directory}")
-        if args.timeout is not None:
-            llm_invoke.LLM_INVOKE_TIMEOUT_S = args.timeout
         backend = resolve_backend(
-            provider=args.provider, model=args.model, max_tokens=args.max_tokens
+            provider=args.provider,
+            model=args.model,
+            max_tokens=args.max_tokens,
+            timeout=args.timeout,
         )
         print(f"model: {backend.description}", file=sys.stderr)
 

@@ -194,21 +194,20 @@ def test_cli_glossary_failure_is_reported_not_raised(
 
 
 def test_cli_passes_the_local_model_options(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    _no_model_lookup: dict[str, Any],
 ) -> None:
-    from auto_ontology.utils import llm_invoke
-
     document = tmp_path / "doc.txt"
     document.write_text("texte", encoding="utf-8")
     seen: dict[str, Any] = {}
 
     def fake_extract(text: str, **kwargs: Any) -> TextOntologyResult:
         seen.update(kwargs)
-        seen["timeout"] = llm_invoke.LLM_INVOKE_TIMEOUT_S
         return TextOntologyResult(ontology=TextOntology())
 
     monkeypatch.setattr(cli, "extract_text_ontology", fake_extract)
-    monkeypatch.setattr(llm_invoke, "LLM_INVOKE_TIMEOUT_S", 120)
 
     code, _, _ = _run(
         [
@@ -223,7 +222,7 @@ def test_cli_passes_the_local_model_options(
     )
 
     assert code == 0
-    assert seen["timeout"] == 600
+    assert _no_model_lookup["timeout"] == 600
     assert seen["max_tokens"] == 4096
     assert seen["skip_failed_chunks"] is True
 
@@ -254,6 +253,7 @@ def test_cli_passes_provider_model_and_clean(
         "provider": "local",
         "model": "auto",
         "max_tokens": 8192,
+        "timeout": None,
     }
     assert seen["clean"] is True
     assert isinstance(seen["backend"], _StubBackend)

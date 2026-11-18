@@ -112,3 +112,48 @@ def test_import_ask_and_sdk_work_on_one_project(
     client = tmp_path / "client.py"
     assert studio.main(["sdk", "--out", str(client), "--home", str(home)]) == 0
     compile(client.read_text(encoding="utf-8"), str(client), "exec")
+
+
+def test_open_makes_the_folder_a_watched_current_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(studio, "serve", lambda **kwargs: seen.update(kwargs))
+    folder = tmp_path / "Contrats 2026"
+    folder.mkdir()
+    home = tmp_path / "home"
+
+    assert studio.main(["open", str(folder), "--no-browser", "--home", str(home)]) == 0
+    assert studio.main(["open", str(folder), "--no-browser", "--home", str(home)]) == 0
+
+    store = ProjectStore(home)
+    assert [p.name for p in store.list_projects()] == ["Contrats 2026"]  # reopened
+    assert store.current().name == "Contrats 2026"
+    assert seen["watch"] == str(folder.resolve())
+    assert seen["open_browser"] is False
+
+
+def test_open_refuses_a_missing_folder(tmp_path: Path) -> None:
+    assert studio.main(["open", str(tmp_path / "absent"), "--home", str(tmp_path)]) == 1
+
+
+def test_the_watcher_imports_into_the_current_project(tmp_path: Path) -> None:
+    from auto_ontology.text_ontology import watch
+    from auto_ontology.text_ontology.sample import FakeLLM
+
+    store = ProjectStore(tmp_path / "home")
+    store.create("Autre")
+    current = store.open_named("Courant")
+
+    class Studio:
+        fake = True
+        llm_factory = None
+
+    Studio.store = store  # type: ignore[attr-defined]
+    document = tmp_path / "note.txt"
+    document.write_text("Alice travaille pour ACME.", encoding="utf-8")
+    assert FakeLLM  # the fake model answers without a network
+
+    watch._ingest_path(Studio(), document)
+
+    assert store.load(current.id).documents

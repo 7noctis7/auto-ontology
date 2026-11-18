@@ -17,8 +17,9 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from typing import TYPE_CHECKING
+
 import httpx
-from langchain_core.language_models import BaseChatModel
 
 from auto_ontology.text_ontology.local_llm import (
     LocalChatModel,
@@ -26,6 +27,9 @@ from auto_ontology.text_ontology.local_llm import (
     is_local_endpoint,
 )
 from auto_ontology.text_ontology.store import ProjectStore, default_home, read_settings
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 NVIDIA_INTEGRATE = "https://integrate.api.nvidia.com/v1"
 NVIDIA_INFERENCE = "https://inference-api.nvidia.com/v1"

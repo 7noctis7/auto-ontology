@@ -29,14 +29,16 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
-import openai
 from pydantic import ValidationError
 
 from auto_ontology.text_ontology.models import TextOntology
+
+if TYPE_CHECKING:
+    import openai
 
 logger = logging.getLogger(__name__)
 
@@ -314,13 +316,17 @@ class LocalChatModel:
     transport_retries: int = 1
     notes: list[str] = field(default_factory=list)
     _strategy: int = 0
-    _client: openai.OpenAI | None = None
+    _client: Any = None
 
     @property
     def strategy(self) -> str:
         return _STRATEGIES[self._strategy].name
 
     def _openai(self) -> openai.OpenAI:
+        # Imported here: the client costs a few hundred milliseconds to load,
+        # and most commands never send a request.
+        import openai
+
         if self._client is None:
             self._client = openai.OpenAI(
                 base_url=self.base_url,
@@ -341,6 +347,8 @@ class LocalChatModel:
 
     def _complete(self, system: str, turns: list[dict[str, str]]) -> tuple[str, str]:
         """The answer text and finish reason, stepping down strategies on refusal."""
+        import openai
+
         while True:
             strategy = _STRATEGIES[self._strategy]
             kwargs: dict[str, Any] = {
@@ -375,6 +383,8 @@ class LocalChatModel:
             return text, choice.finish_reason or ""
 
     def _call(self, kwargs: dict[str, Any]) -> Any:
+        import openai
+
         for attempt in range(self.transport_retries + 1):
             try:
                 return self._openai().chat.completions.create(**kwargs)
@@ -391,6 +401,8 @@ class LocalChatModel:
 
     def __call__(self, system: str, user: str) -> TextOntology | None:
         """The ontology the model gives for one chunk, or ``None``."""
+        import openai
+
         turns = [{"role": "user", "content": user}]
         fallback: TextOntology | None = None
         for attempt in range(2):

@@ -125,6 +125,18 @@ def main(argv: list[str] | None = None) -> int:
         "mcp", help="Serveur MCP sur l'entrée standard, en lecture seule."
     )
     mcp_parser.add_argument("--home", default=None)
+    open_parser = commands.add_parser(
+        "open",
+        help="Ouvre un dossier de travail : projet du même nom, import, "
+        "surveillance et studio, en une commande.",
+    )
+    open_parser.add_argument("folder", help="Dossier à importer et à surveiller.")
+    open_parser.add_argument("--port", type=int, default=None)
+    open_parser.add_argument("--no-browser", action="store_true")
+    open_parser.add_argument("--home", default=None)
+    open_parser.add_argument(
+        "--fake", action="store_true", help="Sans modèle (démonstration)."
+    )
     sdk_parser = commands.add_parser(
         "sdk", help="Écrit un client Python à partir du schéma du projet courant."
     )
@@ -154,6 +166,47 @@ def main(argv: list[str] | None = None) -> int:
         serve_mcp(Path(args.home) if args.home else None)
     elif args.command == "sdk":
         write_sdk(Path(args.out), home=Path(args.home) if args.home else None)
+    elif args.command == "open":
+        return open_folder(
+            Path(args.folder),
+            port=args.port,
+            open_browser=not args.no_browser,
+            home=Path(args.home) if args.home else None,
+            fake=args.fake,
+        )
+    return 0
+
+
+def open_folder(
+    folder: Path,
+    *,
+    port: int | None = None,
+    open_browser: bool = True,
+    home: Path | None = None,
+    fake: bool = False,
+) -> int:
+    """``ontology open <folder>``: one command from a folder to a studio.
+
+    The project takes the folder's name (reopened next time), the watcher
+    imports the files already there and those that arrive, and the page
+    opens on that project.
+    """
+    from auto_ontology.text_ontology.store import ProjectStore
+
+    folder = folder.expanduser().resolve()
+    if not folder.is_dir():
+        print(f"Dossier introuvable : {folder}", file=sys.stderr)
+        return 1
+    root = Path(home) if home is not None else default_home()
+    project = ProjectStore(root).open_named(folder.name)
+    print(f"Projet « {project.name} » — dossier surveillé : {folder}")
+    serve(
+        port=port,
+        open_browser=open_browser,
+        home=root,
+        fake=fake,
+        watch=str(folder),
+    )
     return 0
 
 

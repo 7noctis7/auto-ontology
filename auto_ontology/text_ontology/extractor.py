@@ -22,10 +22,10 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 from auto_ontology.text_ontology.cache import ChunkCache, chunk_cache_key
 from auto_ontology.text_ontology.clean import clean_text
@@ -41,7 +41,6 @@ from auto_ontology.text_ontology.normalize import (
     split_words,
     to_pascal_case,
 )
-from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +355,18 @@ Backend = Callable[[str, str], "TextOntology | None"]
 """One extraction call: (system prompt, user message) -> ontology, or None."""
 
 
+def invoke_with_structured_output(*args: Any, **kwargs: Any) -> Any:
+    """The application's structured LLM call, imported when first needed.
+
+    LangChain and the product's client cost about a second to import; a
+    command that never calls a hosted model (help, clean, export, eval of two
+    files, a local model) does not pay it.
+    """
+    from auto_ontology.utils.llm_invoke import invoke_with_structured_output as call
+
+    return call(*args, **kwargs)
+
+
 @dataclass
 class StructuredBackend:
     """The application's own LLM client, through its structured-output call."""
@@ -371,6 +382,8 @@ class StructuredBackend:
         return f"{model} (hosted)"
 
     def __call__(self, system: str, user: str) -> TextOntology | None:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         return invoke_with_structured_output(
             self.client,
             [SystemMessage(content=system), HumanMessage(content=user)],

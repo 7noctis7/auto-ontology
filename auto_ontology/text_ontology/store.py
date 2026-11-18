@@ -110,6 +110,27 @@ class ProjectStore:
         found.sort(key=lambda project: project.updated_at, reverse=True)
         return found
 
+    def current(self) -> Project | None:
+        """The project the studio has open: the last one used, else the newest."""
+        last = self.settings().last_project_id
+        if last:
+            try:
+                return self.load(last)
+            except (FileNotFoundError, ValueError):
+                pass
+        projects = self.list_projects()
+        return projects[0] if projects else None
+
+    def open_named(self, name: str) -> Project:
+        """The project called *name*, created if there is none, made current."""
+        project = next((p for p in self.list_projects() if p.name == name), None)
+        if project is None:
+            project = self.create(name)
+        settings = self.settings()
+        settings.last_project_id = project.id
+        self.save_settings(settings)
+        return project
+
     def create(self, name: str) -> Project:
         moment = now_iso()
         project = Project(

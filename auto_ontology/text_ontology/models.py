@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from auto_ontology.utils.llm_invoke import StrictLLMOutputModel
+from auto_ontology.utils.structured import StrictLLMOutputModel
 
 # Spellings of "no parent" that models write instead of a JSON null, the prompt's
 # own placeholder ("ClasseParenteOuNull") included.
