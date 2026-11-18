@@ -19,6 +19,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
 from auto_ontology.utils.model_config import resolve
+
 # Re-exported: schemas across the product import it from here.
 from auto_ontology.utils.structured import StrictLLMOutputModel  # noqa: F401
 
