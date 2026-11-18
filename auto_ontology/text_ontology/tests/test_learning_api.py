@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from auto_ontology.text_ontology.api import access_allowed
 from auto_ontology.text_ontology.app.server import create_app
 from auto_ontology.text_ontology.extractor import build_user_message
-from auto_ontology.text_ontology.mcp_stdio import _handle
+from auto_ontology.text_ontology.mcp_stdio import StudioMcp
 from auto_ontology.text_ontology.sample import FakeLLM
 from auto_ontology.text_ontology.store import ProjectStore
 
@@ -128,13 +128,12 @@ def test_corrections_enter_the_next_prompt_and_gold_is_scored(
 def test_mcp_lists_tools(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     client.post("/api/sample")
-    store = ProjectStore(tmp_path)
-    listed = _handle(store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    server = StudioMcp(ProjectStore(tmp_path))
+    listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert listed is not None
     names = [tool["name"] for tool in listed["result"]["tools"]]
     assert "search" in names
-    called = _handle(
-        store,
+    called = server.handle(
         {
             "jsonrpc": "2.0",
             "id": 2,

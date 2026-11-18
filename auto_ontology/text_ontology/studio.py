@@ -132,9 +132,45 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question")
     ask_parser.add_argument("--home", default=None)
     mcp_parser = commands.add_parser(
-        "mcp", help="Serveur MCP sur l'entrée standard, en lecture seule."
+        "mcp",
+        help="Serveur MCP sur l'entrée standard (lecture ; écritures confirmées "
+        "avec --allow-writes).",
     )
     mcp_parser.add_argument("--home", default=None)
+    mcp_parser.add_argument(
+        "--allow-writes",
+        action="store_true",
+        help="Ajoute remember_fact et certify_rule : chaque écriture demande un "
+        "aperçu puis un jeton de confirmation, et s'annule depuis le studio.",
+    )
+    report_parser = commands.add_parser(
+        "report",
+        help="Rapport Markdown depuis les faits : compte rendu de réunion ou "
+        "tableau comparatif.",
+    )
+    report_parser.add_argument("kind", choices=["meeting", "compare"])
+    report_parser.add_argument("names", nargs="*", help="compare : deux noms ou plus.")
+    report_parser.add_argument(
+        "--document", default=None, help="meeting : partie du nom du fichier."
+    )
+    report_parser.add_argument("--out", default=None, help="Écrit dans ce fichier.")
+    report_parser.add_argument("--json", action="store_true")
+    report_parser.add_argument("--home", default=None)
+    rules_parser = commands.add_parser(
+        "rules", help="Règles et décisions certifiées du projet courant."
+    )
+    rules_parser.add_argument(
+        "action", nargs="?", choices=["list", "add", "retire"], default="list"
+    )
+    rules_parser.add_argument(
+        "text", nargs="?", default="", help="add : la règle ; retire : son id."
+    )
+    rules_parser.add_argument("--source", default="", help="add : d'où elle vient.")
+    rules_parser.add_argument("--rationale", default="", help="add : pourquoi.")
+    rules_parser.add_argument(
+        "--all", action="store_true", help="list : y compris retirées."
+    )
+    rules_parser.add_argument("--home", default=None)
     open_parser = commands.add_parser(
         "open",
         help="Ouvre un dossier de travail : projet du même nom, import, "
@@ -226,7 +262,27 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "mcp":
         from auto_ontology.text_ontology.mcp_stdio import serve_mcp
 
-        serve_mcp(Path(args.home) if args.home else None)
+        serve_mcp(
+            Path(args.home) if args.home else None, allow_writes=args.allow_writes
+        )
+    elif args.command == "report":
+        return write_report(
+            args.kind,
+            names=args.names,
+            document=args.document,
+            out=Path(args.out) if args.out else None,
+            as_json=args.json,
+            home=Path(args.home) if args.home else None,
+        )
+    elif args.command == "rules":
+        return manage_rules(
+            args.action,
+            args.text,
+            source=args.source,
+            rationale=args.rationale,
+            show_all=args.all,
+            home=Path(args.home) if args.home else None,
+        )
     elif args.command == "sdk":
         write_sdk(Path(args.out), home=Path(args.home) if args.home else None)
     elif args.command == "tables":
@@ -272,6 +328,94 @@ def daily_report(kind: str, *, since: str, as_json: bool, home: Path | None) -> 
         else diff(project, store.project_dir(project.id), moment)  # type: ignore[arg-type, attr-defined]
     )
     sys.stdout.write(to_json(report.as_dict()) if as_json else report.markdown())
+    return 0
+
+
+def write_report(
+    kind: str,
+    *,
+    names: list[str],
+    document: str | None,
+    out: Path | None,
+    as_json: bool,
+    home: Path | None,
+) -> int:
+    """``ontology report meeting|compare``: Markdown from the facts."""
+    from auto_ontology.text_ontology.daily import as_json as to_json
+    from auto_ontology.text_ontology.reports import ReportError, comparison, meeting
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    _store, project = found
+    try:
+        report = (
+            meeting(project, document)  # type: ignore[arg-type]
+            if kind == "meeting"
+            else comparison(project, names)  # type: ignore[arg-type]
+        )
+    except ReportError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    text = to_json(report.as_dict()) if as_json else report.markdown()
+    if out is not None:
+        from auto_ontology.text_ontology.store import atomic_write_text
+
+        atomic_write_text(out, text)
+        print(out)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def manage_rules(
+    action: str,
+    text: str,
+    *,
+    source: str,
+    rationale: str,
+    show_all: bool,
+    home: Path | None,
+) -> int:
+    """``ontology rules [list|add|retire]``: the person certifies directly."""
+    from auto_ontology.text_ontology.agent_writes import (
+        WriteError,
+        certify_rule,
+        retire_rule,
+    )
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    store, project = found
+    try:
+        if action == "add":
+            done = certify_rule(
+                store,  # type: ignore[arg-type]
+                project,  # type: ignore[arg-type]
+                {"text": text, "source": source, "rationale": rationale},
+                actor="local",
+            )
+            print(done["summary"] + ("" if done["applied"] else " (inchangé)"))
+            return 0
+        if action == "retire":
+            rule = retire_rule(store, project, text.strip(), actor="local")  # type: ignore[arg-type]
+            print(f"Retirée : {rule.text}")
+            return 0
+    except WriteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    rules = [
+        rule
+        for rule in project.rules  # type: ignore[attr-defined]
+        if show_all or rule.status == "certified"
+    ]
+    if not rules:
+        print('Aucune règle certifiée. Ajoutez-en une : ontology rules add "…"')
+    for rule in rules:
+        mark = "" if rule.status == "certified" else " [retirée]"
+        origin = f" — {rule.source}" if rule.source else ""
+        print(f"{rule.id}  {rule.created_at[:10]}  {rule.text}{origin}{mark}")
     return 0
 
 

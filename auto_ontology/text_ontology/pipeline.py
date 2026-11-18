@@ -89,7 +89,37 @@ def ingest_document(
     cancel_event: threading.Event | None,
     on_event: Callable[[dict[str, object]], None],
 ) -> Project:
-    """Extract *loaded* into *project* and save after each chunk."""
+    """Extract *loaded* into *project* and save after each chunk.
+
+    The project is marked busy meanwhile, so another process (an MCP
+    client's write) waits instead of being overwritten by the next save.
+    """
+    with store.busy(project.id):
+        return _ingest_document(
+            store,
+            project,
+            loaded,
+            config=config,
+            llm=llm,
+            model_label=model_label,
+            force=force,
+            cancel_event=cancel_event,
+            on_event=on_event,
+        )
+
+
+def _ingest_document(
+    store: ProjectStore,
+    project: Project,
+    loaded: LoadedDocument,
+    *,
+    config: LlmConfig,
+    llm: BaseChatModel | None,
+    model_label: str,
+    force: bool,
+    cancel_event: threading.Event | None,
+    on_event: Callable[[dict[str, object]], None],
+) -> Project:
     if not loaded.text.strip():
         raise IngestError(
             "empty_document",

@@ -253,6 +253,24 @@ class DatasetRecord(BaseModel):
     added_at: str = ""
 
 
+class BusinessRule(BaseModel):
+    """A rule or decision the team holds true, with where it comes from.
+
+    Unlike an extracted fact, a rule is stated, not read: "a contract over
+    50 k€ needs two signatures". ``status`` is ``certified`` or ``retired``
+    (kept for the record, no longer applied).
+    """
+
+    id: str
+    text: str
+    status: str = "certified"
+    rationale: str = ""
+    source: str = ""
+    tags: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    actor: str = "local"
+
+
 class Project(BaseModel):
     """One domain, stored as ``project.json``."""
 
@@ -273,6 +291,7 @@ class Project(BaseModel):
     object_sets: list[ObjectSetDef] = Field(default_factory=list)
     notes: list[NoteLink] = Field(default_factory=list)
     datasets: list[DatasetRecord] = Field(default_factory=list)
+    rules: list[BusinessRule] = Field(default_factory=list)
     questions: list[CompetencyQuestion] = Field(default_factory=list)
     mappings: list[VocabularyMapping] = Field(default_factory=list)
     base_iri: str = ""

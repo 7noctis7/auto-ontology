@@ -12,12 +12,15 @@ to ``~/AutoOntology`` so the files are where a person can find them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
-import time
+import sys
 import tempfile
+import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +33,10 @@ from auto_ontology.text_ontology.studio_models import (
 
 _HISTORY_LIMIT = 30
 _PROJECT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+BUSY_FILE = ".busy"
+# A marker not refreshed for this long belongs to a process that died
+# without removing it (it is refreshed on every save of the extraction).
+_BUSY_STALE_S = 30 * 60
 
 
 def now_iso() -> str:
@@ -85,6 +92,7 @@ class ProjectStore:
     def __init__(self, home: Path) -> None:
         self.home = Path(home)
         self.home.mkdir(parents=True, exist_ok=True)
+        self._busy: set[str] = set()
 
     def project_dir(self, project_id: str) -> Path:
         # The id comes from URLs: only the shape the store generates can name
@@ -183,6 +191,56 @@ class ProjectStore:
         body = project.model_dump_json(indent=2) + "\n"
         self._atomic_write(target, body)
         self._mirror_branch(directory, body)
+        marker = directory / BUSY_FILE
+        if project.id in self._busy and marker.exists():
+            with contextlib.suppress(OSError):
+                os.utime(marker)  # still alive: see busy_reason
+
+    def revision(self, project_id: str) -> str:
+        """Changes on every save. A preview made at one revision is stale at another."""
+        try:
+            stat = (self.project_dir(project_id) / "project.json").stat()
+        except FileNotFoundError:
+            return "absent"
+        return f"{stat.st_mtime_ns}-{stat.st_size}"
+
+    @contextlib.contextmanager
+    def busy(self, project_id: str) -> Iterator[None]:
+        """Mark *project_id* as being extracted, for other processes to see.
+
+        The page refuses writes during an extraction within one process; this
+        marker tells another one (``ontology mcp``) to wait too, since the
+        extraction saves its own copy after every chunk and would overwrite
+        what was written meanwhile.
+        """
+        directory = self.project_dir(project_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        marker = directory / BUSY_FILE
+        marker.write_text(
+            json.dumps({"pid": os.getpid(), "at": now_iso()}), encoding="utf-8"
+        )
+        self._busy.add(project_id)
+        try:
+            yield
+        finally:
+            self._busy.discard(project_id)
+            with contextlib.suppress(OSError):
+                marker.unlink()
+
+    def busy_reason(self, project_id: str) -> str | None:
+        """Why *project_id* cannot be written now, or ``None``."""
+        marker = self.project_dir(project_id) / BUSY_FILE
+        try:
+            age = time.time() - marker.stat().st_mtime
+            pid = int(json.loads(marker.read_text(encoding="utf-8")).get("pid", 0))
+        except (OSError, ValueError, AttributeError):
+            return None
+        if age > _BUSY_STALE_S or not _alive(pid):
+            return None
+        return (
+            "Une extraction est en cours sur ce projet. Réessayez quand elle "
+            "sera terminée."
+        )
 
     def can_undo(self, project_id: str) -> bool:
         return any(self._history(project_id).glob("*.json"))
@@ -272,3 +330,21 @@ class ProjectStore:
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
         atomic_write_text(path, content)
+
+
+def _alive(pid: int) -> bool:
+    """Whether *pid* runs. Without a safe check (Windows), the age decides."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        # os.kill(pid, 0) sends CTRL_C_EVENT on Windows: never use it there.
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # alive, owned by someone else
+    return True

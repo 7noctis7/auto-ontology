@@ -76,6 +76,8 @@ STUDIO_COMMANDS = (
     "tables",
     "sql",
     "ask",
+    "report",
+    "rules",
     "mcp",
     "sdk",
 )
@@ -90,7 +92,9 @@ Studio commands (same entry point):
   tables   list the current project's tables: columns, types, samples
   sql      one read-only SELECT on those tables
   ask      answer from the current project's facts, with sources
-  mcp      read-only MCP server on standard input
+  report   meeting summary or comparison table, in Markdown, from the facts
+  rules    business rules and decisions the team certified
+  mcp      MCP server on standard input (confirmed writes: --allow-writes)
   sdk      write a Python client for the current project's schema
 
 `<command> --help` describes each one. Without a command, files are extracted:

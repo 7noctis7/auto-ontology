@@ -92,6 +92,17 @@ class Job:
             self.condition.notify_all()
 
 
+# Finished jobs kept for the page to replay; older ones are forgotten so a
+# studio left open for weeks does not hold every event it ever sent.
+_KEPT_JOBS = 20
+
+
+def _prune_jobs(studio: Studio) -> None:
+    finished = [job_id for job_id, job in studio.jobs.items() if job.finished]
+    for job_id in finished[: max(0, len(finished) - _KEPT_JOBS + 1)]:
+        del studio.jobs[job_id]
+
+
 class Studio:
     """Process-wide handles: files, the running job, the optional fake model."""
 
@@ -304,6 +315,7 @@ def create_app(
             return view
         _begin(studio)
         job = Job(project.id)
+        _prune_jobs(studio)
         studio.jobs[job.id] = job
 
         def run() -> None:

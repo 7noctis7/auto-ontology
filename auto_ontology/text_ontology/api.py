@@ -10,11 +10,12 @@ are not on this machine, and only when ``ONTOLOGY_API_TOKEN`` is set.
 
 from __future__ import annotations
 
+import hmac
 import os
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -151,12 +152,20 @@ def access_allowed(client_host: str, authorization: str, token: str) -> bool:
     """Local clients are always allowed. A remote client needs the token if one is set."""
     if client_host in _LOCAL or not token:
         return True
-    return authorization == f"Bearer {token}"
+    # Constant time: the comparison must not tell how much of a guess was right.
+    return hmac.compare_digest(authorization.encode(), f"Bearer {token}".encode())
 
 
 class SqlBody(BaseModel):
     sql: str = Field(..., min_length=1, max_length=20_000)
     limit: int = Field(default=200, ge=1, le=5000)
+
+
+class RuleBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    rationale: str = Field(default="", max_length=2000)
+    source: str = Field(default="", max_length=2000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
 
 
 def install_api(app: FastAPI) -> None:
@@ -484,6 +493,66 @@ def install_api(app: FastAPI) -> None:
         studio, project = _studio(request)
         result = diff(project, studio.store.project_dir(project.id), moment)
         return {**result.as_dict(), "markdown": result.markdown()}
+
+    @app.get("/api/v1/rules")
+    def get_rules(request: Request, include_retired: bool = False) -> dict[str, Any]:
+        """Business rules and decisions the team certified, newest first."""
+        project = _project(request)
+        rules = [
+            rule.model_dump()
+            for rule in reversed(project.rules)
+            if include_retired or rule.status == "certified"
+        ]
+        return {"rules": rules}
+
+    @app.post("/api/v1/rules")
+    def post_rule(body: RuleBody, request: Request) -> dict[str, Any]:
+        """Certify a rule. The same text twice is recorded once."""
+        from auto_ontology.text_ontology.agent_writes import WriteError, certify_rule
+
+        _require_write(request)
+        studio, project = _studio(request)
+        try:
+            return certify_rule(studio.store, project, body.model_dump(), actor="local")
+        except WriteError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/v1/rules/{rule_id}")
+    def delete_rule(rule_id: str, request: Request) -> dict[str, Any]:
+        """Retire a rule: kept for the record, no longer applied. Undoable."""
+        from auto_ontology.text_ontology.agent_writes import WriteError, retire_rule
+
+        _require_write(request)
+        studio, project = _studio(request)
+        try:
+            rule = retire_rule(studio.store, project, rule_id, actor="local")
+        except WriteError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return rule.model_dump()
+
+    @app.get("/api/v1/report/meeting")
+    def get_meeting_report(
+        request: Request, document: str | None = None
+    ) -> dict[str, Any]:
+        """One document's facts as a meeting summary skeleton, in Markdown."""
+        from auto_ontology.text_ontology.reports import ReportError, meeting
+
+        try:
+            return meeting(_project(request), document).as_dict()
+        except ReportError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/v1/report/compare")
+    def get_comparison_report(
+        request: Request, names: Annotated[list[str], Query()]
+    ) -> dict[str, Any]:
+        """A table of what the project knows about two or more entities."""
+        from auto_ontology.text_ontology.reports import ReportError, comparison
+
+        try:
+            return comparison(_project(request), names).as_dict()
+        except ReportError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/v1/tables")
     def get_tables(request: Request) -> dict[str, Any]:

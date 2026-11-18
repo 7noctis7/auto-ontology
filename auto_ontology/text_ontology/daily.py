@@ -146,7 +146,7 @@ class Brief:
             names = ", ".join(f"{name} ({count})" for name, count in self.top_entities)
             lines.append(f"- Entités les plus citées : {names}.")
         if self.rules:
-            lines += ["", "## Règles et décisions récentes"]
+            lines += ["", "## Règles et décisions certifiées"]
             lines += [f"- {rule}" for rule in self.rules]
         lines += ["", "## À vérifier"]
         lines += [f"- {alert}" for alert in self.alerts] or ["- Rien à signaler."]
@@ -200,9 +200,9 @@ def brief(project: Project, since: datetime, journal: Sequence[Outcome] = ()) ->
         (spelled[key], count) for key, count in entity_mentions.most_common(5)
     ]
     result.rules = [
-        f"{rule.text} ({rule.status})"
-        for rule in getattr(project, "rules", [])
-        if (_moment(rule.created_at) or since) >= since
+        rule.text + (f" — {rule.source}" if rule.source else "")
+        for rule in project.rules
+        if rule.status == "certified" and (_moment(rule.created_at) or since) >= since
     ]
     result.alerts = [
         *(
