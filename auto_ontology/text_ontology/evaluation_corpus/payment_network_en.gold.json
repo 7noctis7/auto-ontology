@@ -1,0 +1,19 @@
+{
+  "classes": [
+    {"name": "FinancialInfrastructure", "parent": null, "description": "System that carries financial operations."},
+    {"name": "PaymentNetwork", "parent": "FinancialInfrastructure", "description": "Network that moves payments."},
+    {"name": "Foundation", "parent": null, "description": "Non-profit organisation."},
+    {"name": "City", "parent": null, "description": "Inhabited place."},
+    {"name": "Person", "parent": null, "description": "A human being."},
+    {"name": "Ledger", "parent": null, "description": "Record of transactions."}
+  ],
+  "triplets": [
+    {"subject": "Meridian", "subject_type": "PaymentNetwork", "predicate": "was_created_by", "object": "Halden Foundation", "object_type": "Foundation"},
+    {"subject": "Halden Foundation", "subject_type": "Foundation", "predicate": "is_based_in", "object": "Oslo", "object_type": "City"},
+    {"subject": "Halden Foundation", "subject_type": "Foundation", "predicate": "is_led_by", "object": "Erik Lund", "object_type": "Person"},
+    {"subject": "Meridian", "subject_type": "PaymentNetwork", "predicate": "runs_on", "object": "Atlas", "object_type": "Ledger"}
+  ],
+  "attributes": [
+    {"entity": "Meridian", "key": "creation_year", "value": "2019"}
+  ]
+}

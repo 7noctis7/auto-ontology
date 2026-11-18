@@ -1,0 +1,4 @@
+Meridian is a peer-to-peer payment network created by the Halden Foundation in 2019.
+The Halden Foundation is based in Oslo and is led by Erik Lund.
+Meridian runs on the Atlas ledger.
+A payment network is a kind of financial infrastructure.

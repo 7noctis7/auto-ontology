@@ -1,0 +1,21 @@
+{
+  "classes": [
+    {"name": "StartUp", "parent": null, "description": "Jeune entreprise innovante."},
+    {"name": "Personne", "parent": null, "description": "Un être humain."},
+    {"name": "Ville", "parent": null, "description": "Lieu habité."},
+    {"name": "EnginSpatial", "parent": null, "description": "Véhicule conçu pour l'espace."},
+    {"name": "SatelliteObservation", "parent": "EnginSpatial", "description": "Satellite qui observe la Terre."}
+  ],
+  "triplets": [
+    {"subject": "Orbital Lab", "subject_type": "StartUp", "predicate": "a_ete_fondee_a", "object": "Toulouse", "object_type": "Ville"},
+    {"subject": "Orbital Lab", "subject_type": "StartUp", "predicate": "a_ete_fondee_par", "object": "Inès Morel", "object_type": "Personne"},
+    {"subject": "Orbital Lab", "subject_type": "StartUp", "predicate": "a_ete_fondee_par", "object": "Karim Benali", "object_type": "Personne"},
+    {"subject": "Orbital Lab", "subject_type": "StartUp", "predicate": "est_dirigee_par", "object": "Inès Morel", "object_type": "Personne"},
+    {"subject": "Héron-1", "subject_type": "SatelliteObservation", "predicate": "a_ete_concu_par", "object": "Orbital Lab", "object_type": "StartUp"}
+  ],
+  "attributes": [
+    {"entity": "Orbital Lab", "key": "annee_fondation", "value": "2015"},
+    {"entity": "Orbital Lab", "key": "nombre_employes", "value": "120"},
+    {"entity": "Héron-1", "key": "annee_lancement", "value": "2022"}
+  ]
+}

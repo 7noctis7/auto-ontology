@@ -1,0 +1,21 @@
+{
+  "classes": [
+    {"name": "Bibliotheque", "parent": null, "description": "Lieu qui conserve et prête des documents."},
+    {"name": "Mediatheque", "parent": "Bibliotheque", "description": "Bibliothèque qui prête aussi des films."},
+    {"name": "Personne", "parent": null, "description": "Un être humain."},
+    {"name": "Exposition", "parent": null, "description": "Présentation publique d'œuvres ou de documents."},
+    {"name": "Ville", "parent": null, "description": "Lieu habité."},
+    {"name": "Pays", "parent": null, "description": "Territoire politique."}
+  ],
+  "triplets": [
+    {"subject": "Médiathèque Jean-Moulin", "subject_type": "Mediatheque", "predicate": "se_trouve_a", "object": "Grenoble", "object_type": "Ville"},
+    {"subject": "Médiathèque Jean-Moulin", "subject_type": "Mediatheque", "predicate": "est_dirigee_par", "object": "Sophie Laurent", "object_type": "Personne"},
+    {"subject": "Sophie Laurent", "subject_type": "Personne", "predicate": "a_organise", "object": "Mémoires du Vercors", "object_type": "Exposition"},
+    {"subject": "Grenoble", "subject_type": "Ville", "predicate": "se_trouve_dans", "object": "France", "object_type": "Pays"}
+  ],
+  "attributes": [
+    {"entity": "Médiathèque Jean-Moulin", "key": "nombre_de_livres", "value": "45000"},
+    {"entity": "Sophie Laurent", "key": "annee_debut_direction", "value": "2018"},
+    {"entity": "Mémoires du Vercors", "key": "annee", "value": "2021"}
+  ]
+}

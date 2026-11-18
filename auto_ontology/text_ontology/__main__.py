@@ -42,6 +42,12 @@ from auto_ontology.text_ontology.export import (  # noqa: E402
 )
 from auto_ontology.utils import llm_invoke  # noqa: E402
 from auto_ontology.text_ontology.clean import clean_text  # noqa: E402
+from auto_ontology.text_ontology.evaluation import (  # noqa: E402
+    CORPUS_DIR,
+    evaluate,
+    evaluate_corpus,
+    load_corpus,
+)
 from auto_ontology.text_ontology.documents import read_document_text  # noqa: E402
 from auto_ontology.text_ontology.extractor import (  # noqa: E402
     DEFAULT_MAX_TOKENS,
@@ -58,7 +64,7 @@ from auto_ontology.text_ontology.project import (  # noqa: E402
     merge_ontologies,
 )
 
-_COMMANDS = ("extract", "merge", "export", "clean", "serve")
+_COMMANDS = ("extract", "merge", "export", "clean", "eval", "serve")
 
 
 class CliError(Exception):
@@ -142,6 +148,57 @@ def _extract(args: argparse.Namespace) -> None:
     _warn(result.warnings)
     output = args.output or (str(project) if project else None)
     _write(dump_ontology(result.ontology), output)
+
+
+def _eval(args: argparse.Namespace) -> None:
+    import json
+
+    if args.inputs:
+        if len(args.inputs) != 2:
+            raise CliError(
+                "eval takes an extraction and a reference: eval found.json gold.json"
+            )
+        result = evaluate(
+            _read_ontology(args.inputs[0]), _read_ontology(args.inputs[1])
+        )
+        payload: dict[str, object] = result.as_dict()
+        report = result.report(f"{args.inputs[0]} comparé à {args.inputs[1]}")
+    else:
+        directory = Path(args.corpus) if args.corpus else CORPUS_DIR
+        documents = load_corpus(directory)
+        if not documents:
+            raise CliError(f"no <name>.txt with a <name>.gold.json in {directory}")
+        if args.timeout is not None:
+            llm_invoke.LLM_INVOKE_TIMEOUT_S = args.timeout
+        backend = resolve_backend(
+            provider=args.provider, model=args.model, max_tokens=args.max_tokens
+        )
+        print(f"model: {backend.description}", file=sys.stderr)
+
+        def run(text: str) -> TextOntology:
+            return extract_text_ontology(
+                text,
+                backend=backend,
+                lang=args.lang,
+                max_chunk_chars=args.chunk_chars,
+                max_tokens=args.max_tokens,
+                skip_failed_chunks=True,
+            ).ontology
+
+        total, per_document = evaluate_corpus(documents, run)
+        payload = {
+            "model": backend.description,
+            "total": total.as_dict(),
+            "documents": {name: e.as_dict() for name, e in per_document.items()},
+        }
+        report = "\n\n".join(
+            [e.report(name) for name, e in per_document.items()]
+            + [total.report(f"Total ({len(per_document)} documents)")]
+        )
+    if args.json:
+        _write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", args.output)
+    else:
+        _write(report + "\n", args.output)
 
 
 def _clean(args: argparse.Namespace) -> None:
@@ -285,6 +342,46 @@ def _parser() -> argparse.ArgumentParser:
     )
     extract.add_argument("--output", "-o", help="Write the JSON here.")
     extract.set_defaults(handler=_extract)
+
+    evaluation = commands.add_parser(
+        "eval",
+        parents=[common],
+        help="Score an extraction against a reference written by hand.",
+        description="Either compare two ontology files (eval found.json "
+        "gold.json), or run the model on a corpus of <name>.txt files with "
+        "<name>.gold.json references (eval --corpus [DIR]; the bundled corpus "
+        "by default) and report precision, recall and F1 per kind of fact.",
+    )
+    evaluation.add_argument(
+        "inputs", nargs="*", help="An extraction and its reference, both JSON."
+    )
+    evaluation.add_argument(
+        "--corpus",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DIR",
+        help="Extract each corpus text and score it (default: the bundled corpus).",
+    )
+    evaluation.add_argument("--lang", default="auto", help="As for extract.")
+    evaluation.add_argument(
+        "--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS, help="As for extract."
+    )
+    evaluation.add_argument(
+        "--max-tokens", type=int, default=DEFAULT_MAX_TOKENS, help="As for extract."
+    )
+    evaluation.add_argument(
+        "--timeout", type=int, metavar="SECONDS", help="As for extract."
+    )
+    evaluation.add_argument(
+        "--provider", choices=["auto", "local", "hosted"], default="auto"
+    )
+    evaluation.add_argument("--model", help="As for extract.")
+    evaluation.add_argument(
+        "--json", action="store_true", help="Print the scores as JSON."
+    )
+    evaluation.add_argument("--output", "-o", help="Write the report here.")
+    evaluation.set_defaults(handler=_eval)
 
     clean = commands.add_parser(
         "clean",
