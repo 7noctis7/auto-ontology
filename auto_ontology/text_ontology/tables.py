@@ -94,18 +94,24 @@ def _writer(path: Path) -> Iterator[Any]:
             connection.close()
 
 
-def _reader(path: Path) -> Any:
+_LOCKED = {"enable_external_access": "false", "lock_configuration": "true"}
+
+
+def _reader(path: Path, *, allow_empty: bool = False) -> Any:
+    """A read-only connection that cannot reach files or the network.
+
+    With *allow_empty* and no tables yet, an empty in-memory database with
+    the same lock, for queries on what ``prepare`` registers (the facts).
+    """
     import duckdb
 
     if not path.is_file():
+        if allow_empty:
+            return duckdb.connect(":memory:", config=_LOCKED)
         raise TableError(
             "Ce projet n'a encore aucune table. Importez un CSV ou un tableur."
         )
-    return duckdb.connect(
-        str(path),
-        read_only=True,
-        config={"enable_external_access": "false", "lock_configuration": "true"},
-    )
+    return duckdb.connect(str(path), read_only=True, config=_LOCKED)
 
 
 def table_name(stem: str, sheet: str = "") -> str:
@@ -436,10 +442,11 @@ def run_sql(
     """Run one read-only ``SELECT`` on the project's tables, capped and timed.
 
     *prepare*, if given, is called with the connection first (it can register
-    functions; the connection is read-only and cannot reach files).
+    functions and in-memory views; the connection is read-only and cannot
+    reach files). With *prepare*, a project without tables is queried too.
     """
     text = check_select(sql)
-    connection = _reader(data_path(project_dir))
+    connection = _reader(data_path(project_dir), allow_empty=prepare is not None)
     timer = threading.Timer(timeout_s, connection.interrupt)
     try:
         if prepare is not None:

@@ -48,7 +48,8 @@ each fact with the passage it was read from.
 - Start with `brief` (what is new) or `search` (find a name), then \
 `get_concept` for everything about one name.
 - For numbers, `list_tables` then `describe_table`, then `run_sql` (one \
-read-only SELECT).
+read-only SELECT). The facts are SQL views too (onto_facts, onto_attributes): \
+join them with a table through okey(), and keep their `quote` column to cite.
 - `ask_question` answers from the facts, with citations; quote them.
 - Writing tools, when present, take two calls: call once without \
 `confirm_token`, show the preview to the person, then call again with the \
@@ -165,7 +166,8 @@ READ_TOOLS = (
     Tool(
         "list_tables",
         "List tables",
-        "Tables loaded from spreadsheets: name, rows, source file.",
+        "Tables loaded from spreadsheets (name, rows, source file), and the "
+        "onto_* views of the facts read from documents, to join with okey().",
     ),
     Tool(
         "describe_table",
@@ -177,8 +179,10 @@ READ_TOOLS = (
     Tool(
         "run_sql",
         "Run SQL",
-        "Run one read-only SELECT (DuckDB dialect) on the project's tables. "
-        "Files, writes and settings are refused; rows are capped.",
+        "Run one read-only SELECT (DuckDB dialect) on the project's tables and "
+        "the onto_facts, onto_attributes, onto_entities and onto_rules views. "
+        "Join names with okey(), e.g. okey(t.client) = f.subject_key. Files, "
+        "writes and settings are refused; rows are capped.",
         {"sql": _string("One SELECT statement."), "limit": _integer("Rows.", 1, 5000)},
         ("sql",),
     ),
@@ -473,6 +477,9 @@ class StudioMcp:
 
     @staticmethod
     def _tables(project: Project, _a: dict[str, Any]) -> object:
+        from auto_ontology.text_ontology.bridge import FACT_VIEWS, fact_frames
+
+        frames = fact_frames(project)
         return {
             "tables": [
                 {
@@ -483,25 +490,46 @@ class StudioMcp:
                     "columns": [c.name for c in d.columns],
                 }
                 for d in project.datasets
-            ]
+            ],
+            "views": [
+                {"view": name, "rows": len(frames[name]), "columns": list(columns)}
+                for name, columns in FACT_VIEWS.items()
+            ],
+            "join": "okey(text) = <view>.*_key joins a table's names with the facts.",
         }
 
     @staticmethod
     def _describe(project: Project, a: dict[str, Any]) -> object:
+        from auto_ontology.text_ontology.bridge import FACT_VIEWS, fact_frames
+
         wanted = _required(a, "table")
         record = next((d for d in project.datasets if d.table == wanted), None)
-        if record is None:
-            names = ", ".join(d.table for d in project.datasets) or "aucune"
-            raise ToolError(f"Table inconnue : {wanted} (tables : {names}).")
-        return record.model_dump()
+        if record is not None:
+            return record.model_dump()
+        if wanted in FACT_VIEWS:
+            frame = fact_frames(project)[wanted]
+            return {
+                "view": wanted,
+                "rows": len(frame),
+                "columns": [
+                    {
+                        "name": column,
+                        "samples": [
+                            str(v) for v in frame[column].dropna().unique()[:5]
+                        ],
+                    }
+                    for column in FACT_VIEWS[wanted]
+                ],
+            }
+        names = ", ".join([*(d.table for d in project.datasets), *FACT_VIEWS])
+        raise ToolError(f"Table inconnue : {wanted} (tables : {names}).")
 
     def _sql(self, project: Project, a: dict[str, Any]) -> object:
-        from auto_ontology.text_ontology.tables import run_sql
+        from auto_ontology.text_ontology.bridge import run_bridge_sql
 
-        if not project.datasets:
-            raise ToolError("Aucune table : importez d'abord un tableur (CSV, Excel).")
-        result = run_sql(
+        result = run_bridge_sql(
             self.store.project_dir(project.id),
+            project,
             _required(a, "sql"),
             limit=_limit(a, 200, 5000),
         )

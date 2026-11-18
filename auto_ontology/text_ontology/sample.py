@@ -13,6 +13,7 @@ the same graph.
 
 from __future__ import annotations
 
+import json
 import re
 
 from auto_ontology.text_ontology.models import (
@@ -136,6 +137,28 @@ class FakeLLM:
 
     def with_structured_output(self, schema: type, **_: object) -> FakeLLM:
         return self
+
+    def complete(self, system: str, user: str) -> str:
+        """Free-text answers for questions on the data, without a model.
+
+        The demo query lists the table (or the facts) the question names
+        best; the demo answer only counts the rows.
+        """
+        if '{"answer"' in system:
+            rows = re.search(r'"rows": (\[.*\])\}\s*$', user, re.DOTALL)
+            count = len(json.loads(rows.group(1))) if rows else 0
+            return json.dumps(
+                {"answer": f"{count} ligne(s) trouvée(s) (démonstration)."}
+            )
+        tables = re.findall(r"^(?:Table|Vue) (\w+) ", user, re.MULTILINE)
+        question = user.rsplit("Question:", 1)[-1].casefold()
+        chosen = next(
+            (t for t in tables if t.replace("_", " ") in question or t in question),
+            tables[0] if tables else "onto_facts",
+        )
+        return json.dumps(
+            {"sql": f"SELECT * FROM {chosen} LIMIT 20", "explanation": "démonstration"}
+        )
 
     def invoke(self, messages: list[object]) -> TextOntology:
         text = _message_text(messages)

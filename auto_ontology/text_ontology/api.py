@@ -556,9 +556,17 @@ def install_api(app: FastAPI) -> None:
 
     @app.get("/api/v1/tables")
     def get_tables(request: Request) -> dict[str, Any]:
-        """Tables loaded from spreadsheets: columns, types, row counts, samples."""
+        """Tables loaded from spreadsheets, and the views of the facts beside them."""
+        from auto_ontology.text_ontology.bridge import FACT_VIEWS
+
         project = _project(request)
-        return {"tables": [item.model_dump() for item in project.datasets]}
+        return {
+            "tables": [item.model_dump() for item in project.datasets],
+            "views": [
+                {"view": name, "columns": list(columns)}
+                for name, columns in FACT_VIEWS.items()
+            ],
+        }
 
     @app.post("/api/v1/sql")
     def post_sql(body: SqlBody, request: Request) -> dict[str, Any]:
@@ -567,16 +575,41 @@ def install_api(app: FastAPI) -> None:
         The statement is checked, and the connection is read-only with no
         access to files or the network, whoever wrote the query.
         """
-        from auto_ontology.text_ontology.tables import TableError, run_sql
+        from auto_ontology.text_ontology.bridge import run_bridge_sql
+        from auto_ontology.text_ontology.tables import TableError
 
         studio, project = _studio(request)
         try:
-            result = run_sql(
-                studio.store.project_dir(project.id), body.sql, limit=body.limit
+            result = run_bridge_sql(
+                studio.store.project_dir(project.id),
+                project,
+                body.sql,
+                limit=body.limit,
             )
         except TableError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result.as_dict()
+
+    @app.post("/api/v1/ask/data")
+    def post_ask_data(body: QuestionBody, request: Request) -> dict[str, Any]:
+        """A question on tables and facts: the model writes a checked SELECT.
+
+        The query runs read-only, with the onto_* views of the facts beside
+        the tables; the answer is phrased from the rows only, with sources.
+        """
+        from auto_ontology.text_ontology.app.server import _prepare_llm
+        from auto_ontology.text_ontology.bridge import ask_data
+        from auto_ontology.text_ontology.tables import TableError
+
+        studio, project = _studio(request)
+        _config, llm, _label = _prepare_llm(studio)
+        try:
+            answer = ask_data(
+                project, studio.store.project_dir(project.id), body.text, llm
+            )
+        except TableError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return answer.as_dict()
 
     @app.get("/api/v1/branches")
     def get_branches(request: Request) -> dict[str, Any]:

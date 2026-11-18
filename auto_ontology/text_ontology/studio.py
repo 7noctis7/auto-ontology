@@ -130,6 +130,14 @@ def main(argv: list[str] | None = None) -> int:
         "ask", help="Répond depuis les faits du projet, avec la source."
     )
     ask_parser.add_argument("question")
+    ask_parser.add_argument(
+        "--data",
+        action="store_true",
+        help="Répond aussi depuis les tables : le modèle écrit une requête SQL "
+        "(vérifiée, en lecture seule) qui croise tableurs et faits des documents.",
+    )
+    ask_parser.add_argument("--json", action="store_true")
+    ask_parser.add_argument("--fake", action="store_true", help="Sans modèle.")
     ask_parser.add_argument("--home", default=None)
     mcp_parser = commands.add_parser(
         "mcp",
@@ -258,7 +266,12 @@ def main(argv: list[str] | None = None) -> int:
             home=Path(args.home) if args.home else None,
         )
     elif args.command == "ask":
-        print(ask_project(args.question, home=Path(args.home) if args.home else None))
+        home = Path(args.home) if args.home else None
+        if args.data:
+            return ask_data_cli(
+                args.question, home=home, fake=args.fake, as_json=args.json
+            )
+        print(ask_project(args.question, home=home))
     elif args.command == "mcp":
         from auto_ontology.text_ontology.mcp_stdio import serve_mcp
 
@@ -435,6 +448,7 @@ def _current_project(home: Path | None) -> tuple[object, object] | None:
 
 def show_tables(*, home: Path | None) -> int:
     """``ontology tables``: what the current project's tables hold."""
+    from auto_ontology.text_ontology.bridge import describe_views
     from auto_ontology.text_ontology.tables import describe_tables
 
     found = _current_project(home)
@@ -442,9 +456,33 @@ def show_tables(*, home: Path | None) -> int:
         return 1
     _store, project = found
     print(
-        describe_tables(project)
+        describe_tables(project)  # type: ignore[arg-type]
         or "Aucune table : importez un CSV, un Excel ou une base SQLite."
-    )  # type: ignore[arg-type]
+    )
+    print()
+    print(describe_views(project))  # type: ignore[arg-type]
+    return 0
+
+
+def ask_data_cli(question: str, *, home: Path | None, fake: bool, as_json: bool) -> int:
+    """``ontology ask --data``: a question on tables and facts together."""
+    from auto_ontology.text_ontology.bridge import ask_data
+    from auto_ontology.text_ontology.daily import as_json as to_json
+    from auto_ontology.text_ontology.llm_settings import build_llm, resolve_llm_config
+    from auto_ontology.text_ontology.sample import FakeLLM
+    from auto_ontology.text_ontology.tables import TableError
+
+    found = _current_project(home)
+    if found is None:
+        return 1
+    store, project = found
+    try:
+        llm = FakeLLM() if fake else build_llm(resolve_llm_config(store))  # type: ignore[arg-type]
+        answer = ask_data(project, store.project_dir(project.id), question, llm)  # type: ignore[arg-type, attr-defined]
+    except (TableError, EnvironmentError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.write(to_json(answer.as_dict()) if as_json else answer.markdown())
     return 0
 
 
@@ -453,14 +491,20 @@ def query_tables(query: str, *, limit: int, output: str, home: Path | None) -> i
     import csv
     import json
 
-    from auto_ontology.text_ontology.tables import TableError, run_sql
+    from auto_ontology.text_ontology.bridge import run_bridge_sql
+    from auto_ontology.text_ontology.tables import TableError
 
     found = _current_project(home)
     if found is None:
         return 1
     store, project = found
     try:
-        result = run_sql(store.project_dir(project.id), query, limit=limit)  # type: ignore[attr-defined]
+        result = run_bridge_sql(
+            store.project_dir(project.id),  # type: ignore[attr-defined]
+            project,  # type: ignore[arg-type]
+            query,
+            limit=limit,
+        )
     except TableError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -399,6 +399,15 @@ class LocalChatModel:
     def description(self) -> str:
         return f"{self.model} on the local server {self.base_url}"
 
+    def complete(self, system: str, user: str) -> str:
+        """A free answer to one message, reasoning blocks removed.
+
+        Used for questions on the data, which ask for a small JSON object: the
+        same request strategies apply (JSON mode first, then plain text).
+        """
+        text, _finish = self._complete(system, [{"role": "user", "content": user}])
+        return _without_reasoning(text)
+
     def __call__(self, system: str, user: str) -> TextOntology | None:
         """The ontology the model gives for one chunk, or ``None``."""
         import openai
